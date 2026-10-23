@@ -122,12 +122,11 @@ enum VirtualMachineTools {
     private static let stopVM = MCPTool(
         name: "stop_vm",
         title: "Stop Virtual Machine",
-        description: "Asks a running virtual machine to shut down, as if its power button was pressed.",
+        description: "Asks a running virtual machine to shut down, as if its power button was pressed. For Windows, waits until it has shut down.",
         inputSchema: schema(["name": property("string", "The name of the virtual machine.")], required: ["name"]),
-        run: { arguments, _ in
+        run: { arguments, progress in
             let model = try Library.machine(named: try arguments.requiredString("name"))
-            try await App.open("stop", name: model.name)
-            return "Asked \(model.name) to shut down."
+            return try await stop(model, progress: progress)
         }
     )
 
@@ -202,6 +201,38 @@ enum VirtualMachineTools {
     }
 
     private static let stoppedGracePeriod = Duration.seconds(30)
+
+    /// How long Windows has to shut down, and how often its power button is pressed again meanwhile. The first press
+    /// only wakes Windows if its display has gone to sleep.
+    private static let stopTimeout = Duration.seconds(180)
+    private static let powerButtonInterval = Duration.seconds(30)
+
+    private static func stop(_ model: VBVirtualMachine, progress: @escaping MCPTool.ProgressHandler) async throws -> String {
+        guard model.configuration.systemType == .windows else {
+            try await App.open("stop", name: model.name)
+            return "Asked \(model.name) to shut down."
+        }
+
+        guard WindowsGuestStatus(for: model) != .stopped else {
+            return "\(model.name) isn’t running."
+        }
+
+        let deadline = ContinuousClock.now + stopTimeout
+        while ContinuousClock.now < deadline {
+            try await App.open("stop", name: model.name)
+            await progress("Waiting for \(model.name) to shut down", nil)
+
+            let nextPress = ContinuousClock.now + powerButtonInterval
+            while ContinuousClock.now < nextPress {
+                try await Task.sleep(for: .seconds(1))
+                if WindowsGuestStatus(for: model) == .stopped {
+                    return "\(model.name) has shut down."
+                }
+            }
+        }
+
+        throw Failure("\(model.name) didn’t shut down within \(stopTimeout.components.seconds / 60) minutes. Windows may be waiting for something, such as unsaved work.")
+    }
 
     private static func waitUntilSignedIn(name: String, timeout: Duration, progress: @escaping MCPTool.ProgressHandler) async throws -> String {
         let model = try Library.windowsMachine(named: name)
