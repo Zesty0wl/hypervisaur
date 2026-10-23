@@ -176,8 +176,10 @@ public final class VBAPIClient {
         }
 
         let data = try Data(contentsOf: url)
+        let catalog = try decoder.decode(SoftwareCatalog.self, from: data)
 
-        return try decoder.decode(SoftwareCatalog.self, from: data)
+        let imagesURL = url.deletingLastPathComponent().appending(path: "images", directoryHint: .isDirectory)
+        return catalog.usingBundledImages(in: imagesURL)
     }
 
     @MainActor

@@ -1,4 +1,0 @@
-#!/usr/bin/env zsh
-
-# Use local copy of the distbuddy repo for now
-DISTBUDDY_LIBRARY_PATH=$HOME/Developer/_projects/distbuddy distbuddy $@

@@ -1,46 +1,14 @@
 #include "Paths.xcconfig"
 
-// Settings in this file only apply to the main VirtualBuddy.app target
+// Settings in this file only apply to the main Hypervisaur.app target
 
 // Entitlement Settings
 
-// Name of the provisioning profile used for all managed builds (debug, beta, release, dev release).
-MANAGED_PROFILE = VirtualBuddy Dev Mid 2025
+CODE_SIGN_ENTITLEMENTS = $(ENTITLEMENTS_DIR)/VirtualBuddy.entitlements
+PROVISIONING_PROFILE_SPECIFIER =
+CODE_SIGN_STYLE = Automatic
 
-CODE_SIGN_ENTITLEMENTS[config=Debug][sdk=*][arch=*] = $(ENTITLEMENTS_DIR)/VirtualBuddy.entitlements
-CODE_SIGN_ENTITLEMENTS[config=Release][sdk=*][arch=*] = $(ENTITLEMENTS_DIR)/VirtualBuddy.entitlements
-CODE_SIGN_ENTITLEMENTS[config=Debug_Managed][sdk=*][arch=*] = $(ENTITLEMENTS_DIR)/VirtualBuddy_Managed.entitlements
-CODE_SIGN_ENTITLEMENTS[config=Release_Managed][sdk=*][arch=*] = $(ENTITLEMENTS_DIR)/VirtualBuddy_Managed.entitlements
-CODE_SIGN_ENTITLEMENTS[config=Dev_Release][sdk=*][arch=*] = $(ENTITLEMENTS_DIR)/VirtualBuddy_Managed.entitlements
-CODE_SIGN_ENTITLEMENTS[config=Beta_Debug][sdk=*][arch=*] = $(ENTITLEMENTS_DIR)/VirtualBuddy_Managed.entitlements
-CODE_SIGN_ENTITLEMENTS[config=Beta_Release][sdk=*][arch=*] = $(ENTITLEMENTS_DIR)/VirtualBuddy_Managed.entitlements
-
-PROVISIONING_PROFILE_SPECIFIER[config=Debug][sdk=*][arch=*] =
-PROVISIONING_PROFILE_SPECIFIER[config=Release][sdk=*][arch=*] =
-PROVISIONING_PROFILE_SPECIFIER[config=Debug_Managed][sdk=*][arch=*] = $(MANAGED_PROFILE)
-PROVISIONING_PROFILE_SPECIFIER[config=Release_Managed][sdk=*][arch=*] = $(MANAGED_PROFILE)
-PROVISIONING_PROFILE_SPECIFIER[config=Dev_Release][sdk=*][arch=*] = $(MANAGED_PROFILE)
-PROVISIONING_PROFILE_SPECIFIER[config=Beta_Debug][sdk=*][arch=*] = $(MANAGED_PROFILE)
-PROVISIONING_PROFILE_SPECIFIER[config=Beta_Release][sdk=*][arch=*] = $(MANAGED_PROFILE)
-
-CODE_SIGN_STYLE[config=Debug][sdk=*][arch=*] = Automatic
-CODE_SIGN_STYLE[config=Release][sdk=*][arch=*] = Automatic
-CODE_SIGN_STYLE[config=Debug_Managed][sdk=*][arch=*] = Manual
-CODE_SIGN_STYLE[config=Release_Managed][sdk=*][arch=*] = Manual
-CODE_SIGN_STYLE[config=Dev_Release][sdk=*][arch=*] = Manual
-CODE_SIGN_STYLE[config=Beta_Debug][sdk=*][arch=*] = Manual
-CODE_SIGN_STYLE[config=Beta_Release][sdk=*][arch=*] = Manual
-
-// Release Train Settings
-
-// Special app icon for development releases. Note that Xcode uses the first icon when sorted alphabetically, hence why the default icon has the -Default suffix.
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon-Default
-ASSETCATALOG_COMPILER_APPICON_NAME[config=Dev_Release][sdk=*][arch=*] = AppIcon-Dev
-ASSETCATALOG_COMPILER_APPICON_NAME[config=Beta_Debug][sdk=*][arch=*] = AppIcon-zBeta
-ASSETCATALOG_COMPILER_APPICON_NAME[config=Beta_Release][sdk=*][arch=*] = AppIcon-zBeta
 
 PRODUCT_NAME = Hypervisaur
-
-// Development releases named Hypervisaur-Dev.app
-PRODUCT_NAME[config=Dev_Release][sdk=*][arch=*] = Hypervisaur-Dev
 

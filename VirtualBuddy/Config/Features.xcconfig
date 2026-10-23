@@ -3,7 +3,3 @@
 // Hypervisaur doesn't publish updates yet, so it's built without Sparkle, which would otherwise check VirtualBuddy's update feed.
 OTHER_SWIFT_FLAGS = $(inherited)
 
-// The BETA flag must be present in all targets, hence why these are here instead of in AppTarget.xcconfig
-OTHER_SWIFT_FLAGS[config=Beta_Debug][sdk=*][arch=*] = -D BETA $(inherited)
-OTHER_SWIFT_FLAGS[config=Beta_Release][sdk=*][arch=*] = -D BETA $(inherited)
-
