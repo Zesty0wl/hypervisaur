@@ -14,7 +14,7 @@ struct VBMCP: AsyncParsableCommand {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
 
         let server = MCPServer(
-            name: "virtualbuddy",
+            name: "hypervisaur",
             version: version,
             instructions: VirtualMachineTools.instructions,
             tools: VirtualMachineTools.all

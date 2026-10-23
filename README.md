@@ -96,6 +96,8 @@ Hypervisaur builds with Xcode 26 or later.
 
 The project's targets and modules keep VirtualBuddy's names so that changes from VirtualBuddy can still be merged.
 
+To build a notarized disk image for release, run `Scripts/release.sh` with a Developer ID certificate, a Developer ID provisioning profile and an App Store Connect API key. The script describes what it needs.
+
 ## Acknowledgements
 
 Hypervisaur stands on the work of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) and its contributors, and on [QEMU](https://www.qemu.org), [swtpm](https://github.com/stefanberger/swtpm), [wimlib](https://wimlib.net), [UTM](https://github.com/utmapp/UTM), the [virtio-win drivers](https://github.com/virtio-win/kvm-guest-drivers-windows), [Homebrew](https://brew.sh) and the [USB ID Repository](http://www.linux-usb.org/usb-ids.html). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licenses of the software that Hypervisaur includes or uses.

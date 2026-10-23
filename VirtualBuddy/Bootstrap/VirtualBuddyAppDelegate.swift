@@ -14,10 +14,6 @@ import OSLog
 import Combine
 import SwiftUI
 
-#if BUILDING_NON_MANAGED_RELEASE
-#error("Trying to build for release without using the managed scheme. This build won't include managed entitlements. This error is here for Rambo, you may safely comment it out and keep going.")
-#endif
-
 @MainActor
 @objc final class VirtualBuddyAppDelegate: NSObject, NSApplicationDelegate {
 
