@@ -7,15 +7,16 @@
       "name" : "Release",
       "note" : "Public, stable releases."
     },
-        {
-            "icon": "checkmark.seal",
-            "id": "lts",
-            "name": "LTS",
-            "note": "Long-term support releases"
-        },
+    {
+      "icon" : "checkmark.seal",
+      "id" : "lts",
+      "name" : "LTS",
+      "note" : "Long-term support releases"
+    },
     {
       "icon" : "wrench.and.screwdriver",
       "id" : "daily",
+      "prerelease" : true,
       "name" : "Daily",
       "note" : "Daily builds meant for testing."
     }
@@ -70,23 +71,22 @@
       "name" : "Rosetta Sharing",
       "unsupportedPlatform" : false
     },
-        {
-            "id": "provisioning",
-            "minVersionGuest": "0.0.0",
-            "minVersionHost": "27.0.0",
-            "name": "Skip Setup Assistant",
-            "unsupportedPlatform": true
-        },
-        {
-            "id": "usb_passthrough",
-            "minVersionGuest": "0.0.0",
-            "minVersionHost": "27.0.0",
-            "name": "USB device passthrough",
-            "unsupportedPlatform": true
-        }
+    {
+      "id" : "provisioning",
+      "minVersionGuest" : "0.0.0",
+      "minVersionHost" : "27.0.0",
+      "name" : "Skip Setup Assistant",
+      "unsupportedPlatform" : true
+    },
+    {
+      "id" : "usb_passthrough",
+      "minVersionGuest" : "0.0.0",
+      "minVersionHost" : "27.0.0",
+      "name" : "USB device passthrough",
+      "unsupportedPlatform" : true
+    }
   ],
-    "deviceSupportVersions": [
-    ],
+  "deviceSupportVersions" : [],
   "groups" : [
     {
       "darkImage" : {
@@ -94,10 +94,10 @@
         "thumbnail" : {
           "blurHash" : "UIE0281ds7Ey1a$MWYaysSjvoMjsWoWUo2jv",
           "height" : 405,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/jammyjellyfish-dark-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/jammyjellyfish-dark-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/jammyjellyfish-dark.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/jammyjellyfish-dark.heic"
       },
       "id" : "ubuntu",
       "image" : {
@@ -105,10 +105,10 @@
         "thumbnail" : {
           "blurHash" : "UIE0281ds7Ey1a$MWYaysSjvoMjsWoWUo2jv",
           "height" : 405,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/jammyjellyfish-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/jammyjellyfish-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/jammyjellyfish.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/jammyjellyfish.heic"
       },
       "majorVersion" : "22.0.0",
       "name" : "Ubuntu"
@@ -119,10 +119,10 @@
         "thumbnail" : {
           "blurHash" : "U96%Xrw$I%oLS,NWR#ohRyR}bGohW8s?oNWU",
           "height" : 720,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/debian-dark-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/debian-dark-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/debian-dark.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/debian-dark.heic"
       },
       "id" : "debian",
       "image" : {
@@ -130,12 +130,12 @@
         "thumbnail" : {
           "blurHash" : "U96%Xrw$I%oLS,NWR#ohRyR}bGohW8s?oNWU",
           "height" : 720,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/debian-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/debian-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/debian.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/debian.heic"
       },
-      "majorVersion" : "12.0.0",
+      "majorVersion" : "13.0.0",
       "name" : "Debian"
     },
     {
@@ -144,10 +144,10 @@
         "thumbnail" : {
           "blurHash" : "UQ6+b#kCMcflyGaeR4f5R4ayozj[Mbofx^a}",
           "height" : 720,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/fedora-dark-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/fedora-dark-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/fedora-dark.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/fedora-dark.heic"
       },
       "id" : "fedora",
       "image" : {
@@ -155,12 +155,12 @@
         "thumbnail" : {
           "blurHash" : "UE6.Evf5D6j[*0ahMdf8Htf*xufQD5kC%fbG",
           "height" : 720,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/fedora-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/fedora-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/fedora.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/fedora.heic"
       },
-      "majorVersion" : "41.0.0",
+      "majorVersion" : "44.0.0",
       "name" : "Fedora"
     },
     {
@@ -169,10 +169,10 @@
         "thumbnail" : {
           "blurHash" : "UD7CB$.AnftURMkEo$ozMwRPRjawWBa#f-ae",
           "height" : 405,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/kali-dark-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/kali-dark-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/kali-dark.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/kali-dark.heic"
       },
       "id" : "kali",
       "image" : {
@@ -180,17 +180,16 @@
         "thumbnail" : {
           "blurHash" : "UD7CB$.AnftURMkEo$ozMwRPRjawWBa#f-ae",
           "height" : 405,
-          "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/kali-thumbnail.heic",
+          "url" : "https://api.virtualbuddy.app/v2/images/kali-thumbnail.heic",
           "width" : 720
         },
-        "url" : "https:\/\/api.virtualbuddy.app\/v2\/images\/kali.heic"
+        "url" : "https://api.virtualbuddy.app/v2/images/kali.heic"
       },
-      "majorVersion" : "2025.0.0",
+      "majorVersion" : "2026.0.0",
       "name" : "Kali"
     }
   ],
-    "legacyGuestAppVersions": [
-    ],
+  "legacyGuestAppVersions" : [],
   "minAppVersion" : "2.0.0",
   "requirementSets" : [
     {
@@ -201,101 +200,151 @@
     }
   ],
   "restoreImages" : [
-        {
-            "build": "26.04 LTS",
-            "channel": "lts",
-            "downloadSize": 4161089536,
-            "group": "ubuntu",
-            "id": "26.04_Desktop",
-            "mobileDeviceMinVersion": "0.0.0",
-            "name": "Ubuntu Desktop 26.04 LTS",
-            "requirements": "min_host_13",
-            "url": "https://cdimage.ubuntu.com/releases/26.04/release/ubuntu-26.04-desktop-arm64.iso",
-            "version": "26.04"
-        },
-        {
-            "build": "26.04 LTS",
-            "channel": "lts",
-            "downloadSize": 3068473344,
-            "group": "ubuntu",
-            "id": "26.04_Server",
-            "mobileDeviceMinVersion": "0.0.0",
-            "name": "Ubuntu Server 26.04 LTS",
-            "requirements": "min_host_13",
-            "url": "https://cdimage.ubuntu.com/releases/26.04/release/ubuntu-26.04-live-server-arm64.iso",
-            "version": "26.04"
-        },
-        {
-            "build": "25.10",
-            "channel": "regular",
-            "downloadSize": 4981665792,
-            "group": "ubuntu",
-            "id": "25.10_Desktop",
-            "mobileDeviceMinVersion": "0.0.0",
-            "name": "Ubuntu Desktop 25.10",
-            "requirements": "min_host_13",
-            "url": "https://cdimage.ubuntu.com/releases/25.10/release/ubuntu-25.10-desktop-arm64.iso",
-            "version": "25.10"
-        },
     {
-      "build" : "24.04.4 LTS",
+      "build" : "26.04 LTS",
       "channel" : "lts",
-      "downloadSize" : 3059724288,
+      "downloadSize" : 4154798080,
       "group" : "ubuntu",
-      "id" : "24.04.4 LTS",
+      "id" : "26.04_Desktop",
       "mobileDeviceMinVersion" : "0.0.0",
-      "name" : "Ubuntu Server 24.04.4 LTS",
+      "name" : "Ubuntu Desktop 26.04 LTS",
       "requirements" : "min_host_13",
-      "url" : "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04.4-live-server-arm64.iso",
-      "version" : "24.04.4"
+      "url" : "https://cdimage.ubuntu.com/releases/26.04/release/ubuntu-26.04.1-desktop-arm64.iso",
+      "version" : "26.04",
+      "releaseSource" : {
+        "indexes" : [
+          "https://cdimage.ubuntu.com/releases/26.04/release/SHA256SUMS"
+        ],
+        "fileNamePattern" : "ubuntu-26\\.04(\\.\\d+)?-desktop-arm64\\.iso"
+      }
     },
-        {
-            "build": "25.10",
-            "channel": "regular",
-            "downloadSize": 2394763264,
-            "group": "ubuntu",
-            "id": "25.10_Server",
-            "mobileDeviceMinVersion": "0.0.0",
-            "name": "Ubuntu Server 25.10",
-            "requirements": "min_host_13",
-            "url": "https://cdimage.ubuntu.com/releases/25.10/release/ubuntu-25.10-live-server-arm64.iso",
-            "version": "25.10"
-        },
     {
-      "build" : "42.1.1",
+      "build" : "26.04 LTS",
+      "channel" : "lts",
+      "downloadSize" : 3076861952,
+      "group" : "ubuntu",
+      "id" : "26.04_Server",
+      "mobileDeviceMinVersion" : "0.0.0",
+      "name" : "Ubuntu Server 26.04 LTS",
+      "requirements" : "min_host_13",
+      "url" : "https://cdimage.ubuntu.com/releases/26.04/release/ubuntu-26.04.1-live-server-arm64.iso",
+      "version" : "26.04",
+      "releaseSource" : {
+        "indexes" : [
+          "https://cdimage.ubuntu.com/releases/26.04/release/SHA256SUMS"
+        ],
+        "fileNamePattern" : "ubuntu-26\\.04(\\.\\d+)?-live-server-arm64\\.iso"
+      }
+    },
+    {
+      "build" : "26.10",
       "channel" : "regular",
-      "downloadSize" : 1006553088,
+      "downloadSize" : 4601491456,
+      "group" : "ubuntu",
+      "id" : "26.10_Desktop",
+      "mobileDeviceMinVersion" : "0.0.0",
+      "name" : "Ubuntu Desktop 26.10",
+      "requirements" : "min_host_13",
+      "url" : "https://cdimage.ubuntu.com/releases/26.10/release/ubuntu-26.10-desktop-arm64.iso",
+      "version" : "26.10",
+      "releaseSource" : {
+        "indexes" : [
+          "https://cdimage.ubuntu.com/releases/26.10/release/SHA256SUMS"
+        ],
+        "fileNamePattern" : "ubuntu-26\\.10(\\.\\d+)?-desktop-arm64\\.iso"
+      }
+    },
+    {
+      "build" : "26.10",
+      "channel" : "regular",
+      "downloadSize" : 3075813376,
+      "group" : "ubuntu",
+      "id" : "26.10_Server",
+      "mobileDeviceMinVersion" : "0.0.0",
+      "name" : "Ubuntu Server 26.10",
+      "requirements" : "min_host_13",
+      "url" : "https://cdimage.ubuntu.com/releases/26.10/release/ubuntu-26.10-live-server-arm64.iso",
+      "version" : "26.10",
+      "releaseSource" : {
+        "indexes" : [
+          "https://cdimage.ubuntu.com/releases/26.10/release/SHA256SUMS"
+        ],
+        "fileNamePattern" : "ubuntu-26\\.10(\\.\\d+)?-live-server-arm64\\.iso"
+      }
+    },
+    {
+      "build" : "24.04 LTS",
+      "channel" : "lts",
+      "downloadSize" : 3825512448,
+      "group" : "ubuntu",
+      "id" : "24.04_Server",
+      "mobileDeviceMinVersion" : "0.0.0",
+      "name" : "Ubuntu Server 24.04 LTS",
+      "requirements" : "min_host_13",
+      "url" : "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04.5-live-server-arm64.iso",
+      "version" : "24.04",
+      "releaseSource" : {
+        "indexes" : [
+          "https://cdimage.ubuntu.com/releases/24.04/release/SHA256SUMS"
+        ],
+        "fileNamePattern" : "ubuntu-24\\.04(\\.\\d+)?-live-server-arm64\\.iso"
+      }
+    },
+    {
+      "build" : "Latest",
+      "channel" : "regular",
+      "downloadSize" : 1247682560,
       "group" : "fedora",
-      "id" : "42.1.1",
+      "id" : "fedora_netinst",
       "mobileDeviceMinVersion" : "0.0.0",
-      "name" : "Fedora 42.1.1 Net Install",
+      "name" : "Fedora Net Install",
       "requirements" : "min_host_13",
-      "url" : "https:\/\/download.fedoraproject.org\/pub\/fedora\/linux\/releases\/42\/Everything\/aarch64\/iso\/Fedora-Everything-netinst-aarch64-42-1.1.iso",
-      "version" : "42.1.1"
+      "url" : "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Everything/aarch64/iso/Fedora-Everything-netinst-aarch64-44-1.7.iso",
+      "version" : "44",
+      "releaseSource" : {
+        "indexes" : [
+          "https://fedoraproject.org/releases.json"
+        ],
+        "fileNamePattern" : "Fedora-Everything-netinst-aarch64-\\d+-[\\d.]+\\.iso"
+      }
     },
     {
-      "build" : "2025.2",
+      "build" : "Latest",
       "channel" : "regular",
-      "downloadSize" : 3767808000,
+      "downloadSize" : 4051513344,
       "group" : "kali",
-      "id" : "2025.2",
+      "id" : "kali_installer",
       "mobileDeviceMinVersion" : "0.0.0",
-      "name" : "Kali Linux 2025.2 Full",
+      "name" : "Kali Linux",
       "requirements" : "min_host_13",
-      "url" : "https:\/\/cdimage.kali.org\/kali-2025.2\/kali-linux-2025.2-installer-arm64.iso",
-      "version" : "2025.2.0"
+      "url" : "https://cdimage.kali.org/current/kali-linux-2026.3-installer-arm64.iso",
+      "version" : "2026.3.0",
+      "releaseSource" : {
+        "indexes" : [
+          "https://cdimage.kali.org/current/SHA256SUMS"
+        ],
+        "fileNamePattern" : "kali-linux-\\d{4}\\.\\d+[a-z]?-installer-arm64\\.iso"
+      }
     },
-        {
-            "build": "12.11",
-            "channel": "regular",
-            "downloadSize": 3993284608,
-            "group": "debian",
-            "id": "12.11",
-            "mobileDeviceMinVersion": "0.0.0",
-            "name": "Debian 12.11",
-            "requirements": "min_host_13",
-            "url": "https://cdimage.debian.org/debian-cd/current/arm64/iso-dvd/debian-12.11.0-arm64-DVD-1.iso",
-            "version": "12.11"
-        }
+    {
+      "build" : "13",
+      "channel" : "regular",
+      "downloadSize" : 3993284608,
+      "group" : "debian",
+      "id" : "debian_13",
+      "mobileDeviceMinVersion" : "0.0.0",
+      "name" : "Debian 13",
+      "requirements" : "min_host_13",
+      "url" : "https://cdimage.debian.org/debian-cd/current/arm64/iso-dvd/debian-13.7.0-arm64-DVD-1.iso",
+      "version" : "13",
+      "releaseSource" : {
+        "indexes" : [
+          "https://cdimage.debian.org/debian-cd/current/arm64/iso-dvd/SHA256SUMS",
+          "https://cdimage.debian.org/cdimage/archive/latest-oldstable/arm64/iso-dvd/SHA256SUMS",
+          "https://cdimage.debian.org/cdimage/archive/latest-oldoldstable/arm64/iso-dvd/SHA256SUMS"
+        ],
+        "fileNamePattern" : "debian-13\\.\\d+\\.\\d+-arm64-DVD-1\\.iso"
+      }
+    }
   ]
 }

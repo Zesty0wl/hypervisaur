@@ -1,17 +1,33 @@
 # VirtualCatalog
 
-This directory includes models and associated logic used by VirtualBuddy to inspect and resolve downloadable restore images for virtual machines.
+This directory includes models and associated logic used by Hypervisaur to inspect and resolve downloadable restore images for virtual machines.
 
-The catalog itself is a JSON file stored in the VirtualBuddy GitHub repository.
-
-There are two JSON files for the current version of the catalog:
+The catalog itself is a pair of JSON files in the `data` folder of the repository:
 
 - `ipsws_v2.json`: for macOS virtual machines
 - `linux_v2.json`: for Linux virtual machines
 
-In order to avoid hitting GitHub too frequently and provide server-side logic, I run a small function on Cloudflare that the app talks to via HTTP.
+Hypervisaur reads them from the `main` branch on GitHub, so changes reach everyone without a new version of the app. The same files are built into the app, which uses its own copy when it can't reach GitHub.
 
-The server fetches the appropriate JSON file from the repository based on the request path, performs any compatibility conversions depending on the client version, then returns the catalog in the response, caching it on the CDN for a short period.
+Because every released version of the app reads these files, changes to them must be ones that those versions can still read. New properties must be optional. A change that older versions can't read needs new file names, such as `linux_v3.json`, and a version of the app that reads them.
+
+## Releases That Are Updated in Place
+
+Some distributions replace their images with each point release, so a link to a particular image stops working. A restore image can name where the distribution lists its images, and the app downloads the newest one that matches when the user chooses it:
+
+```json
+"releaseSource" : {
+  "indexes" : [
+    "https://cdimage.debian.org/debian-cd/current/arm64/iso-dvd/SHA256SUMS",
+    "https://cdimage.debian.org/cdimage/archive/latest-oldstable/arm64/iso-dvd/SHA256SUMS"
+  ],
+  "fileNamePattern" : "debian-13\\.\\d+\\.\\d+-arm64-DVD-1\\.iso"
+}
+```
+
+The indexes are tried in order, so a release can still be found after it moves to an archive. An index can be a list of checksums, a directory listing or any other file that names the images, either by file name relative to the index or by URL. The pattern must match the whole file name, and versions in file names are compared as numbers. The restore image's `url` is used if no image can be found, so keep it pointing at a current image.
+
+Channels with betas or other test builds have `"prerelease" : true`, which lists them after releases.
 
 ## Adding New Versions of macOS
 
@@ -37,7 +53,7 @@ OPTIONS:
   -h, --help              Show help information.
 ```
 
-Assuming you have cloned the VirtualBuddy repository in `~/Developer/VirtualBuddy`, here's an example of how you could add a new image to the catalog:
+Assuming you have cloned the repository in `~/Developer/VirtualBuddy`, here's an example of how you could add a new image to the catalog:
 
 ```bash
 vctool catalog image add \
@@ -47,11 +63,9 @@ vctool catalog image add \
     -o ~/Developer/VirtualBuddy/data/ipsws_v2.json
 ``` 
 
-If successful, the `ipsws_v2.json` file in your clone of the VirtualBuddy repository will have the new macOS release added to it.
+If successful, the `ipsws_v2.json` file in your clone of the repository will have the new macOS release added to it.
 
-You may then create a new branch in your fork and submit a pull request.
-
-Shortly after a pull request that updates the software catalog is merged, the updated catalog is picked up by the server, making any new OS releases available in the app.
+Once the change is on the `main` branch, the new release appears in the app the next time it loads the catalog.
 
 ## Updating Existing Versions
 
@@ -61,4 +75,4 @@ If an OS build that's already in the catalog needs to be updated, just use the s
 
 Adding new major OS versions (ex: macOS ~16~26) requires additional work because a corresponding release group has to be added, and that requires the availability of image assets that follow a certain specification used by the app.
 
-For that reason, adding major new OS versions is currently reserved to the maintainer of the repository (@insidegui).
+The images go in `data/images`, which is built into the app, so a new release group needs a new version of the app to show its artwork.

@@ -106,7 +106,18 @@ struct RestoreImageBrowser: View {
     private var stack: some View {
         LazyVStack(alignment: .leading, spacing: 8, pinnedViews: .sectionHeaders) {
             if redaction.isEmpty {
-                ForEach(controller.channelGroups) { group in
+                ForEach(controller.visibleChannelGroups.filter { !$0.channel.isPrerelease }) { group in
+                    section(for: group)
+                }
+
+                if controller.canHideBetas {
+                    Toggle("Show Betas", isOn: $controller.showsBetas)
+                        .toggleStyle(.checkbox)
+                        .padding(.vertical, 8)
+                        .padding(.leading, 4)
+                }
+
+                ForEach(controller.visibleChannelGroups.filter(\.channel.isPrerelease)) { group in
                     section(for: group)
                 }
             } else if controller.isLoading {

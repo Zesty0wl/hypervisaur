@@ -121,13 +121,18 @@ public struct CatalogChannel: CatalogModel {
     public var note: String
     /// SF Symbol name for icon that can be used to represent this channel.
     public var icon: String
+    /// Whether the channel has betas or other builds for testing, which are listed after releases.
+    public var prerelease: Bool?
 
-    public init(id: String, name: String, note: String, icon: String) {
+    public init(id: String, name: String, note: String, icon: String, prerelease: Bool? = nil) {
         self.id = id
         self.name = name
         self.note = note
         self.icon = icon
+        self.prerelease = prerelease
     }
+
+    public var isPrerelease: Bool { prerelease ?? false }
 }
 
 /// Describes a "device support files" installation and the instructions that should be presented to the user when it's required.
@@ -185,6 +190,26 @@ public struct CatalogLegacyGuestAppVersion: CatalogModel {
 public protocol DownloadableCatalogContent: Identifiable, Hashable, Sendable {
     var build: String { get }
     var url: URL { get }
+    var releaseSource: CatalogReleaseSource? { get }
+}
+
+public extension DownloadableCatalogContent {
+    var releaseSource: CatalogReleaseSource? { nil }
+}
+
+/// Where to find the newest image of a release that its publisher replaces in place, such as each point release
+/// of Debian 13, so that the catalog doesn't need updating every time a new image comes out.
+public struct CatalogReleaseSource: Codable, Hashable, Sendable {
+    /// Files that list the release's images, such as a `SHA256SUMS` file, tried in order until one lists an image.
+    /// Images are found by file name, relative to the list, or by URL.
+    public var indexes: [URL]
+    /// A regular expression that matches the whole file name of each of the release's images.
+    public var fileNamePattern: String
+
+    public init(indexes: [URL], fileNamePattern: String) {
+        self.indexes = indexes
+        self.fileNamePattern = fileNamePattern
+    }
 }
 
 /// Defines an individual macOS restore image in the catalog.
@@ -205,12 +230,14 @@ public struct RestoreImage: CatalogModel, DownloadableCatalogContent {
     public var version: SoftwareVersion
     /// The minimum version of the MobileDevice framework required to install this guest.
     public var mobileDeviceMinVersion: SoftwareVersion
-    /// URL to the IPSW file for this restore image.
+    /// URL to the IPSW file for this restore image. With a ``releaseSource``, it's used if the newest image can't be found.
     public var url: URL
     /// The size of the download in bytes.
     public var downloadSize: UInt64?
+    /// Where to find the newest image of this release when it's downloaded.
+    public var releaseSource: CatalogReleaseSource?
 
-    public init(id: String, group: CatalogGroup.ID, channel: CatalogChannel.ID, requirements: RequirementSet.ID, name: String, build: String, version: SoftwareVersion, mobileDeviceMinVersion: SoftwareVersion, url: URL, downloadSize: UInt64?) {
+    public init(id: String, group: CatalogGroup.ID, channel: CatalogChannel.ID, requirements: RequirementSet.ID, name: String, build: String, version: SoftwareVersion, mobileDeviceMinVersion: SoftwareVersion, url: URL, downloadSize: UInt64?, releaseSource: CatalogReleaseSource? = nil) {
         self.id = id
         self.group = group
         self.channel = channel
@@ -221,6 +248,7 @@ public struct RestoreImage: CatalogModel, DownloadableCatalogContent {
         self.mobileDeviceMinVersion = mobileDeviceMinVersion
         self.url = url
         self.downloadSize = downloadSize
+        self.releaseSource = releaseSource
     }
 }
 

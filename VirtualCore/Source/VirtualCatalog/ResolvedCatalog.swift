@@ -45,6 +45,7 @@ public struct ResolvedRestoreImage: ResolvedCatalogModel, DownloadableCatalogCon
     public var version: SoftwareVersion { image.version }
     public var mobileDeviceMinVersion: SoftwareVersion { image.mobileDeviceMinVersion }
     public var url: URL { image.url }
+    public var releaseSource: CatalogReleaseSource? { image.releaseSource }
     public var downloadSize: Int64 { Int64(image.downloadSize ?? 0) }
     public var isDownloaded: Bool { localFileURL != nil }
 

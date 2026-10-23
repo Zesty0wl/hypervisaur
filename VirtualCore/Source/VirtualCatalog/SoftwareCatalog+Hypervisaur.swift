@@ -14,8 +14,11 @@ extension SoftwareCatalog {
         return catalog
     }
 
+    /// Where Hypervisaur's repository publishes the software catalog and the files it refers to.
+    static let repositoryDataURL = URL(string: "https://raw.githubusercontent.com/Zesty0wl/hypervisaur/main/data/")!
+
     /// Where Hypervisaur's repository publishes the legacy guest apps, which are the same files that VirtualBuddy publishes.
-    static let legacyGuestAppBaseURL = URL(string: "https://raw.githubusercontent.com/Zesty0wl/hypervisaur/main/data/LegacyGuestApp/")!
+    static let legacyGuestAppBaseURL = repositoryDataURL.appending(path: "LegacyGuestApp/", directoryHint: .isDirectory)
 
     /// The built-in catalog refers to the legacy guest apps in VirtualBuddy's repository. Hypervisaur's repository has
     /// the same files, which are checked against the catalog's digests after they're downloaded.

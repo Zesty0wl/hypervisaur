@@ -483,8 +483,29 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
                     startDownload(with: url)
                 }
             }
+        } else if let releaseSource = data.downloadReleaseSource {
+            Task {
+                downloadState = .preCheck("Finding the Newest Version")
+
+                startDownload(with: await newestImageURL(of: releaseSource, fallback: url))
+            }
         } else {
             startDownload(with: url)
+        }
+    }
+
+    /// The newest image of a release that's updated in place, or the image in the catalog if it can't be found.
+    private func newestImageURL(of releaseSource: CatalogReleaseSource, fallback: URL) async -> URL {
+        do {
+            let url = try await CatalogReleaseResolver().resolve(releaseSource)
+
+            UILog("Newest image of the release is \(url.absoluteString.quoted).")
+
+            return url
+        } catch {
+            UILog("Couldn't find the newest image of the release, downloading \(fallback.absoluteString.quoted) instead. \(error)")
+
+            return fallback
         }
     }
 

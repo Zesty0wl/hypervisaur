@@ -185,6 +185,18 @@ extension VMInstallData {
         self.resolvedRestoreImage = nil
     }
 
+    /// Where to find the newest image of the selected release, if it's one that's updated in place.
+    var downloadReleaseSource: CatalogReleaseSource? {
+        guard case .remoteOptions(let image) = installMethodSelection else { return nil }
+        return image.releaseSource
+    }
+
+    /// Whether a local file is the download from a URL, or another image of the same release.
+    private func isDownload(_ fileURL: URL, of downloadURL: URL) -> Bool {
+        fileURL.lastPathComponent == downloadURL.lastPathComponent
+            || downloadReleaseSource?.matches(fileName: fileURL.lastPathComponent) == true
+    }
+
     var needsDownload: Bool {
         guard let downloadURL else { return false }
 
@@ -199,7 +211,7 @@ extension VMInstallData {
             /// `localRestoreImageURL` is set when user selects a remote URL but that file has already been downloaded to the local library.
             /// Check that the file name matches and skip download when that's the case.
             /// Also ensure the local file actually exists, as it could have been deleted before the setup process read this property.
-            if let localRestoreImageURL, localRestoreImageURL.lastPathComponent == downloadURL.lastPathComponent, FileManager.default.fileExists(atPath: localRestoreImageURL.path) {
+            if let localRestoreImageURL, isDownload(localRestoreImageURL, of: downloadURL), FileManager.default.fileExists(atPath: localRestoreImageURL.path) {
                 UILog("[\(#function)] Method is \(installMethod), remote URL is \(downloadURL.absoluteString.quoted), found matching download at \(localRestoreImageURL.path.quoted).")
 
                 return false

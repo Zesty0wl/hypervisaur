@@ -22,8 +22,8 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, and a server th
   <img src="./assets/Screenshots/Library.png" width="560" alt="The Hypervisaur library window with a Windows virtual machine">
 </p>
 
-- **macOS virtual machines** on macOS 12 or later, using Apple's Virtualization framework, with the macOS versions available to download built in
-- **Linux virtual machines**, from the distributions in the built-in catalog or any ARM64 disc image
+- **macOS virtual machines** on macOS 12 or later, using Apple's Virtualization framework, with the macOS versions available to download kept up to date from this repository
+- **Linux virtual machines** from Ubuntu, Fedora, Debian and Kali, always downloading the newest image of each release, or from any ARM64 disc image
 - **Windows 11 virtual machines**, installed from Microsoft's Windows 11 ARM64 disc image, optionally without going through Windows Setup at all
 - Shared folders, clipboard sharing and saved sessions for macOS guests
 - Importing virtual machines from VirtualBuddy and UTM

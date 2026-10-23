@@ -31,6 +31,17 @@ extension VBSettings: CatalogDownloadsProvider {
         do {
             let files = try FilePath(downloadsDirectoryURL).children().map(\.url.vb_restoreImageStub)
 
+            /// Any image of a release that's updated in place will do, rather than downloading a newer one.
+            if let releaseSource = restoreImage.releaseSource,
+               let stub = files
+                   .filter({ releaseSource.matches(fileName: $0.url.lastPathComponent) })
+                   .max(by: { $0.url.lastPathComponent.compare($1.url.lastPathComponent, options: .numeric) == .orderedAscending })
+            {
+                logger.debug("Found download of the release \(restoreImage.name.quoted) - \(stub)")
+
+                return stub.url
+            }
+
             guard let stub = files.vb_elementMatchingDownloadableCatalogContent(at: restoreImage.url) else { return nil }
 
             logger.debug("Found download matching \(restoreImage.name.quoted) - \(stub)")

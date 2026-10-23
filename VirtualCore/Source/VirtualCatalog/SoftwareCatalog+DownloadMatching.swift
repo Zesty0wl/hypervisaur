@@ -131,6 +131,9 @@ extension Array where Element: DownloadableCatalogContent {
         if let match = first(where: { $0.url.lastPathComponent.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame }) {
             matchLogger.debug("Matched by file name: \(url.lastPathComponent.quoted) <> \(match.url.lastPathComponent.quoted)")
             return match
+        } else if let match = first(where: { $0.releaseSource?.matches(fileName: url.lastPathComponent) == true }) {
+            matchLogger.debug("Matched by release: \(url.lastPathComponent.quoted) <> \(match.url.lastPathComponent.quoted)")
+            return match
         } else if url.isFileURL,
                   let catalogData = url.vb_softwareCatalogData,
                   let match = first(where: { $0.build == catalogData.build || $0.url.lastPathComponent.caseInsensitiveCompare(catalogData.filename) == .orderedSame }) {

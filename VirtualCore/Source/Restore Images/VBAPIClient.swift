@@ -57,8 +57,8 @@ public final class VBAPIClient {
 
     public let environment: Environment
 
-    /// Hypervisaur doesn't use VirtualBuddy's servers. The software catalog is the one built into the app,
-    /// and macOS builds aren't checked for Apple's signature before they're downloaded.
+    /// Hypervisaur doesn't use VirtualBuddy's servers, so macOS builds aren't checked for Apple's signature before
+    /// they're downloaded. The software catalog comes from Hypervisaur's repository instead.
     public static let isRemoteServiceEnabled = false
 
     public init(environment: Environment = .current) {
@@ -100,7 +100,7 @@ public final class VBAPIClient {
     @MainActor
     func performCatalogFetch(for guest: VBGuestType, skipCache: Bool) async throws -> SoftwareCatalog {
         /// Installers for guests without a catalog are always provided by the user.
-        guard guest.restoreImagesAPIPath != nil else { return .empty }
+        guard guest.catalogFileName != nil else { return .empty }
 
         #if DEBUG
         guard !ProcessInfo.isSwiftUIPreview, !UserDefaults.standard.bool(forKey: "VBForceBuiltInSoftwareCatalog") else {
@@ -108,10 +108,6 @@ public final class VBAPIClient {
             return try Self.fetchBuiltInCatalog(for: guest)
         }
         #endif
-
-        guard Self.isRemoteServiceEnabled else {
-            return try Self.fetchBuiltInCatalog(for: guest)
-        }
 
         do {
             let remoteCatalog = try await fetchRemoteCatalog(for: guest, skipCache: skipCache)
@@ -136,52 +132,60 @@ public final class VBAPIClient {
         }
     }
 
+    /// Reads the catalog from Hypervisaur's repository, so that new releases can be added without a new version of the app.
+    /// It's the same file that's built into the app, so changes to it must be ones that released versions can still read.
     func fetchRemoteCatalog(for guest: VBGuestType, skipCache: Bool) async throws -> SoftwareCatalog {
-        guard let path = guest.restoreImagesAPIPath else {
+        guard let fileName = guest.catalogFileName else {
             throw "There's no software catalog for \(guest.rawValue) guests."
         }
 
-        let req = try request(
-            for: path,
-            cachePolicy: skipCache ? .reloadIgnoringLocalAndRemoteCacheData : .useProtocolCachePolicy
+        let request = URLRequest(
+            url: SoftwareCatalog.repositoryDataURL.appending(path: "\(fileName).json"),
+            cachePolicy: skipCache ? .reloadIgnoringLocalAndRemoteCacheData : .useProtocolCachePolicy,
+            timeoutInterval: 10
         )
 
-        logger.debug("Fetching remote catalog from \(req.url?.host() ?? "<nil>") (skipCache? \(skipCache, privacy: .public))")
+        logger.debug("Fetching remote catalog from \(request.url?.absoluteString ?? "<nil>", privacy: .public) (skipCache? \(skipCache, privacy: .public))")
 
-        let (data, res) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: request)
 
-        let code = (res as! HTTPURLResponse).statusCode
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         guard code == 200 else {
             throw "HTTP \(code)"
         }
 
-        let response = try Self.decoder.decode(SoftwareCatalog.self, from: data)
-
-        return response
+        return try Self.decoder.decode(SoftwareCatalog.self, from: data)
+            .usingBundledImages(in: try Self.builtInCatalogImagesURL)
+            .usingHypervisaurLegacyGuestApps()
     }
 
     static func fetchBuiltInCatalog(for guest: VBGuestType) throws -> SoftwareCatalog {
-        let fileName = switch guest {
-        case .mac:
-            "ipsws_v2"
-        case .linux:
-            "linux_v2"
-        case .windows:
-            throw "There's no built-in software catalog for Windows guests."
+        guard let fileName = guest.catalogFileName else {
+            throw "There's no built-in software catalog for \(guest.rawValue) guests."
         }
 
-        guard let url = Bundle.virtualCore.url(forResource: fileName, withExtension: "json", subdirectory: "SoftwareCatalog") else {
-            throw "\(fileName) not found in VirtualCore SoftwareCatalog resources"
-        }
-
+        let url = try builtInCatalogDirectoryURL.appending(path: "\(fileName).json")
         let data = try Data(contentsOf: url)
         let catalog = try decoder.decode(SoftwareCatalog.self, from: data)
 
-        let imagesURL = url.deletingLastPathComponent().appending(path: "images", directoryHint: .isDirectory)
         return catalog
-            .usingBundledImages(in: imagesURL)
+            .usingBundledImages(in: try builtInCatalogImagesURL)
             .usingHypervisaurLegacyGuestApps()
+    }
+
+    /// The copy of the catalog built into the app, with its artwork in an `images` folder.
+    private static var builtInCatalogDirectoryURL: URL {
+        get throws {
+            guard let url = Bundle.virtualCore.url(forResource: "SoftwareCatalog", withExtension: nil) else {
+                throw "SoftwareCatalog not found in VirtualCore resources"
+            }
+            return url
+        }
+    }
+
+    private static var builtInCatalogImagesURL: URL {
+        get throws { try builtInCatalogDirectoryURL.appending(path: "images", directoryHint: .isDirectory) }
     }
 
     @MainActor
@@ -238,14 +242,12 @@ public final class VBAPIClient {
 }
 
 private extension VBGuestType {
-    var restoreImagesAPIPath: String? {
+    /// The name of the catalog file in Hypervisaur's repository and in the app, without its extension.
+    var catalogFileName: String? {
         switch self {
-        case .mac:
-            return "/restore/mac"
-        case .linux:
-            return "/restore/linux"
-        case .windows:
-            return nil
+        case .mac: "ipsws_v2"
+        case .linux: "linux_v2"
+        case .windows: nil
         }
     }
 }

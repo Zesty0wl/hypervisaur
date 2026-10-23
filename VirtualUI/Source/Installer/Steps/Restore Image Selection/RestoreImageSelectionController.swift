@@ -26,12 +26,35 @@ final class RestoreImageSelectionController: ObservableObject {
             guard let group else { return }
 
             /// Selected group has changed, update available channel groups, images, and selected image.
-            let updatedChannelGroups = ChannelGroup.groups(with: group.restoreImages)
-            channelGroups = updatedChannelGroups
-            images = updatedChannelGroups.flatMap(\.images)
-            selectedRestoreImage = updatedChannelGroups.first?.images.first
+            channelGroups = ChannelGroup.groups(with: group.restoreImages)
+            images = visibleChannelGroups.flatMap(\.images)
+            selectedRestoreImage = images.first
         }
         .store(in: &cancellables)
+    }
+
+    private static let showsBetasKey = "VBShowsBetaRestoreImages"
+
+    /// Whether betas are listed after the releases, for groups that have both.
+    @Published var showsBetas = UserDefaults.standard.bool(forKey: showsBetasKey) {
+        didSet {
+            UserDefaults.standard.set(showsBetas, forKey: Self.showsBetasKey)
+
+            images = visibleChannelGroups.flatMap(\.images)
+            if let selectedRestoreImage, !images.contains(where: { $0.id == selectedRestoreImage.id }) {
+                self.selectedRestoreImage = images.first
+            }
+        }
+    }
+
+    /// Betas can only be hidden when there are releases to show instead, such as before the first release of a new version of macOS.
+    var canHideBetas: Bool {
+        channelGroups.contains(where: \.channel.isPrerelease) && channelGroups.contains(where: { !$0.channel.isPrerelease })
+    }
+
+    var visibleChannelGroups: [ChannelGroup] {
+        guard canHideBetas, !showsBetas else { return channelGroups }
+        return channelGroups.filter { !$0.channel.isPrerelease }
     }
 
     private lazy var api = VBAPIClient.shared
@@ -163,7 +186,7 @@ extension ChannelGroup {
         var groupsByChannel = [CatalogChannel: ChannelGroup]()
 
         for image in restoreImages {
-            /// Ensures images from each channel group are listed in the same order as the channels are ordered in the catalog.
+            /// Channels are listed in the order they first appear in, which is newest first, except that releases come before betas.
             let order = groupsByChannel.keys.count
 
             groupsByChannel[image.channel, default: ChannelGroup(
@@ -173,6 +196,8 @@ extension ChannelGroup {
             )].images.append(image)
         }
 
-        return groupsByChannel.values.sorted(by: { $0.order < $1.order })
+        return groupsByChannel.values.sorted {
+            ($0.channel.isPrerelease ? 1 : 0, $0.order) < ($1.channel.isPrerelease ? 1 : 0, $1.order)
+        }
     }
 }
