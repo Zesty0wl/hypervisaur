@@ -34,6 +34,7 @@ public final class QEMUVirtualMachine: ObservableObject {
     private var swtpmProcess: Process?
     private var monitor: QMPClient?
     private var display: VNCClient?
+    private var clipboardSync: QEMUClipboardSync?
     private var runtimeDirectoryURL: URL?
     private var isStopExpected = false
     private var didReportStop = false
@@ -69,6 +70,12 @@ public final class QEMUVirtualMachine: ObservableObject {
     public func sendPointer(x: Int, y: Int, buttons: VNCClient.PointerButtons) {
         guard state == .running else { return }
         display?.sendPointer(x: x, y: y, buttons: buttons)
+    }
+
+    /// Shares the Mac's clipboard with the guest again, such as when the virtual machine's window becomes active,
+    /// unless something has been copied in the guest since it was last shared.
+    public func offerClipboardToGuest() {
+        clipboardSync?.offerHostText()
     }
 
     // MARK: - Lifecycle
@@ -221,7 +228,7 @@ public final class QEMUVirtualMachine: ObservableObject {
         self.monitor = monitor
 
         let display = try await connectToQEMU {
-            try await VNCClient.connect(path: paths.displaySocket.path, timeout: .seconds(10))
+            try await VNCClient.connect(path: paths.displaySocket.path, timeout: .seconds(10), sharesClipboard: model.configuration.clipboardSharingEnabled)
         }
         display.onFrame = { [weak self] frame in
             self?.deliver(frame)
@@ -231,6 +238,12 @@ public final class QEMUVirtualMachine: ObservableObject {
         }
         self.display = display
         display.start()
+
+        if model.configuration.clipboardSharingEnabled {
+            let clipboardSync = QEMUClipboardSync(display: display)
+            self.clipboardSync = clipboardSync
+            clipboardSync.start()
+        }
 
         try await monitor.execute("cont")
     }
@@ -387,6 +400,8 @@ public final class QEMUVirtualMachine: ObservableObject {
     }
 
     private func tearDown() async {
+        clipboardSync?.stop()
+        clipboardSync = nil
         display?.onFrame = nil
         display?.onDisconnect = nil
         display?.close()

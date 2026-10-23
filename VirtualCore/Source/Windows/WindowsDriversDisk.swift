@@ -3,31 +3,46 @@ import Foundation
 /// A small disk with the ``WindowsDrivers`` that's attached to Windows virtual machines.
 ///
 /// The answer file on the installer disk runs the setup script on it at the end of Windows Setup. It stays attached afterwards
-/// so that the script can be run in virtual machines that were set up without it.
+/// so that the script can be run in virtual machines that were set up without it, and so that Windows runs it again when it
+/// starts if the disk has a newer version than the one that was last run.
 enum WindowsDriversDisk {
     static let volumeName = "DRIVERS"
     static let driversFolderName = "VirtIODrivers"
     static let setupScriptName = "Setup.cmd"
     static let statusScriptName = "Status.cmd"
+    static let setupVersionFileName = "Setup.version"
 
     /// Changes whenever the scripts on the disk change, so that disks with older scripts are created again.
-    private static let layoutVersion = 4
+    private static let layoutVersion = 5
 
     static var contentsVersion: String { "\(WindowsDrivers.contentsVersion)/\(layoutVersion)" }
 
-    /// Installs the drivers, and tasks that tell VirtualBuddy when Windows has started and when someone has signed in.
-    /// Running it in a virtual machine that was set up without it is how they're installed later.
+    /// Installs the drivers, the SPICE agent that shares the clipboard, and tasks that tell Hypervisaur when Windows has started
+    /// and when someone has signed in. Running it in a virtual machine that was set up without it is how they're installed later.
     ///
+    /// The SPICE agent's service starts the agent in each session that's signed in. It's stopped while it's replaced.
     /// The tasks run as the system account, so that no window appears when they run.
     static let setupScript = """
     @echo off
-    rem Installs the VirtIO drivers for Windows virtual machines in Hypervisaur.
+    rem Installs the VirtIO drivers and the clipboard agent for Windows virtual machines in Hypervisaur.
 
     pnputil /add-driver "%~dp0*.inf" /subdirs /install
+
+    set "AgentFolder=%ProgramFiles%\\Hypervisaur\\SPICE Agent"
+    if exist "%~dp0\(WindowsDrivers.clipboardAgentFolderName)\\vdservice.exe" (
+        net stop vdservice >nul 2>&1
+        taskkill /f /im vdagent.exe >nul 2>&1
+        mkdir "%AgentFolder%" 2>nul
+        copy /y "%~dp0\(WindowsDrivers.clipboardAgentFolderName)\\*.exe" "%AgentFolder%" >nul
+        "%AgentFolder%\\vdservice.exe" install >nul 2>&1
+        sc config vdservice start= auto >nul
+        net start vdservice >nul 2>&1
+    )
 
     set "StatusScript=%ProgramData%\\Hypervisaur\\\(statusScriptName)"
     mkdir "%ProgramData%\\Hypervisaur" 2>nul
     copy /y "%~dp0\(statusScriptName)" "%StatusScript%" >nul
+    copy /y "%~dp0\(setupVersionFileName)" "%ProgramData%\\Hypervisaur\\\(setupVersionFileName)" >nul
     schtasks /create /f /tn "Hypervisaur\\Started" /sc onstart /ru SYSTEM /tr "%StatusScript% startup" >nul
     schtasks /create /f /tn "Hypervisaur\\Signed In" /sc onlogon /ru SYSTEM /tr "%StatusScript%" >nul
 
@@ -38,6 +53,10 @@ enum WindowsDriversDisk {
     /// Writes to the status port when Windows starts, and once someone has signed in and their desktop has started.
     /// See ``WindowsGuestStatus``.
     ///
+    /// When Windows starts, it first runs the setup script on the drivers disk if it's a different version from the one
+    /// that was last run. The setup script replaces this script while it runs, which is safe because Windows reads the whole
+    /// of a parenthesized block before running it, and nothing after the block is read again.
+    ///
     /// Windows Setup signs in to a temporary account to finish setting up, so the script also waits for Setup to have
     /// finished, and ignores that account's desktop. `timeout` doesn't work without a console, so `ping` waits between checks.
     static let statusScript = """
@@ -45,6 +64,9 @@ enum WindowsDriversDisk {
     rem Tells Hypervisaur when Windows has started, and when someone has signed in.
 
     if /i "%~1"=="startup" (
+        for %%d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do if exist "%%d:\\\(driversFolderName)\\\(setupVersionFileName)" (
+            fc /b "%%d:\\\(driversFolderName)\\\(setupVersionFileName)" "%ProgramData%\\Hypervisaur\\\(setupVersionFileName)" >nul 2>&1 || call "%%d:\\\(driversFolderName)\\\(setupScriptName)"
+        )
         echo \(WindowsGuestStatus.startedMessage)>\(statusPortPath)
         exit /b 0
     )
@@ -93,6 +115,7 @@ enum WindowsDriversDisk {
             try await HostCommand.run("/usr/bin/rsync", ["-rt", "--exclude", "/.installed", driversURL.path + "/", destinationURL.path + "/"])
             try Data(setupScript.utf8).write(to: destinationURL.appending(path: setupScriptName))
             try Data(statusScript.utf8).write(to: destinationURL.appending(path: statusScriptName))
+            try Data(contentsVersion.utf8).write(to: destinationURL.appending(path: setupVersionFileName))
         }
     }
 

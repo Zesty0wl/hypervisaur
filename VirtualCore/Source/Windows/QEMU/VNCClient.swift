@@ -1,4 +1,5 @@
 import Foundation
+import BuddyFoundation
 import CoreGraphics
 import OSLog
 
@@ -7,6 +8,7 @@ import OSLog
 /// Only the raw encoding is used since the connection never leaves the machine.
 /// Keyboard input uses QEMU's extended key event, which carries scancodes instead of keysyms,
 /// so the guest receives the physical keys regardless of the host's keyboard layout.
+/// Text on the clipboard is shared with ``VNCClipboard``.
 public final class VNCClient: @unchecked Sendable {
     public struct PointerButtons: OptionSet, Sendable {
         public let rawValue: UInt8
@@ -25,6 +27,7 @@ public final class VNCClient: @unchecked Sendable {
         case raw = 0
         case desktopSize = -223
         case qemuExtendedKeyEvent = -258
+        case extendedClipboard = -1_063_131_698
     }
 
     private let logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "VNCClient")
@@ -38,31 +41,42 @@ public final class VNCClient: @unchecked Sendable {
     private var pendingFrame: CGImage?
     private var isFrameDeliveryScheduled = false
 
+    private let sharesClipboard: Bool
+    /// The text on the Mac's clipboard that the guest has been told about, ready to send when it's pasted in the guest.
+    private var hostClipboardPayload: Data?
+
     /// Called on the main queue with the most recent frame. Frames produced while the main queue is busy are dropped.
     public var onFrame: ((CGImage) -> Void)?
 
     /// Called on the main queue once when the connection ends.
     public var onDisconnect: ((Error?) -> Void)?
 
+    /// Called on the main queue when the guest announces that something has been copied, before its text arrives.
+    var onGuestClipboardChange: (() -> Void)?
+
+    /// Called on the main queue with text that was copied in the guest.
+    var onGuestClipboardText: ((String) -> Void)?
+
     public var framebufferSize: CGSize {
         stateLock.withLock { CGSize(width: framebufferWidth, height: framebufferHeight) }
     }
 
-    private init(connection: UnixSocketConnection, width: Int, height: Int) {
+    private init(connection: UnixSocketConnection, width: Int, height: Int, sharesClipboard: Bool) {
         self.connection = connection
         self.framebufferWidth = width
         self.framebufferHeight = height
         self.framebuffer = [UInt8](repeating: 0, count: width * height * 4)
+        self.sharesClipboard = sharesClipboard
     }
 
-    static func connect(path: String, timeout: Duration) async throws -> VNCClient {
+    static func connect(path: String, timeout: Duration, sharesClipboard: Bool) async throws -> VNCClient {
         let connection = try await UnixSocketConnection.connect(path: path, timeout: timeout)
 
         return try await withCheckedThrowingContinuation { continuation in
             Thread.detachNewThread {
                 do {
                     let (width, height) = try Self.handshake(on: connection)
-                    continuation.resume(returning: VNCClient(connection: connection, width: width, height: height))
+                    continuation.resume(returning: VNCClient(connection: connection, width: width, height: height, sharesClipboard: sharesClipboard))
                 } catch {
                     connection.close()
                     continuation.resume(throwing: error)
@@ -114,6 +128,58 @@ public final class VNCClient: @unchecked Sendable {
         message.appendBigEndian(clampedX)
         message.appendBigEndian(clampedY)
         send(message)
+    }
+
+    // MARK: - Clipboard
+
+    /// Tells the guest that there's text on the Mac's clipboard, which is sent if it's pasted in the guest.
+    /// Returns `false` if the text is too long to share.
+    @discardableResult
+    func announceClipboardText(_ text: String) -> Bool {
+        guard sharesClipboard else { return false }
+
+        let payload: Data
+        do {
+            guard let providePayload = try VNCClipboard.providePayload(for: text) else {
+                logger.notice("Not sharing \(text.utf8.count) bytes of text, which is more than the guest accepts")
+                return false
+            }
+            payload = providePayload
+        } catch {
+            logger.error("Couldn't compress the clipboard: \(error, privacy: .public)")
+            return false
+        }
+
+        stateLock.withLock { hostClipboardPayload = payload }
+        send(VNCClipboard.clientMessage([.notify, .text]))
+        return true
+    }
+
+    private func receiveExtendedClipboardMessage(_ message: Data) throws {
+        let flags = VNCClipboard.Flags(rawValue: message.bigEndianUInt32(at: 0))
+        let payload = message.dropFirst(4)
+
+        /// Each message is only one of these, since QEMU ignores the rest of a message after one of them.
+        if flags.contains(.capabilities) {
+            send(VNCClipboard.capabilitiesMessage)
+        } else if flags.contains(.notify) {
+            DispatchQueue.main.async { [self] in onGuestClipboardChange?() }
+
+            if flags.contains(.text) {
+                send(VNCClipboard.clientMessage([.request, .text]))
+            }
+        } else if flags.contains(.request), flags.contains(.text) {
+            guard let payload = stateLock.withLock({ hostClipboardPayload }) else { return }
+
+            send(VNCClipboard.clientMessage([.provide, .text], payload: payload))
+        } else if flags.contains(.provide), flags.contains(.text) {
+            do {
+                let text = try VNCClipboard.text(fromProvidePayload: Data(payload))
+                DispatchQueue.main.async { [self] in onGuestClipboardText?(text) }
+            } catch {
+                logger.error("Couldn't read the guest's clipboard: \(error, privacy: .public)")
+            }
+        }
     }
 
     private func send(_ data: Data) {
@@ -173,7 +239,7 @@ public final class VNCClient: @unchecked Sendable {
         pixelFormat.append(contentsOf: [16, 8, 0, 0, 0, 0])
         try connection.write(pixelFormat)
 
-        let encodings: [Encoding] = [.raw, .desktopSize, .qemuExtendedKeyEvent]
+        let encodings: [Encoding] = [.raw, .desktopSize, .qemuExtendedKeyEvent] + (sharesClipboard ? [.extendedClipboard] : [])
         var setEncodings = Data([2, 0])
         setEncodings.appendBigEndian(UInt16(encodings.count))
         for encoding in encodings {
@@ -210,8 +276,18 @@ public final class VNCClient: @unchecked Sendable {
                 break
             case 3:
                 let header = try connection.read(exactly: 7)
-                let length = Int(header.bigEndianUInt32(at: 3))
-                _ = try connection.read(exactly: length)
+                let length = Int32(bitPattern: header.bigEndianUInt32(at: 3))
+
+                /// A negative length means the message uses the extended clipboard extension.
+                if length < 0 {
+                    let size = Int(length.magnitude)
+                    guard (4...VNCClipboard.maximumMessageSize).contains(size) else {
+                        throw Failure("The display server sent a clipboard message of \(size) bytes.")
+                    }
+                    try receiveExtendedClipboardMessage(try connection.read(exactly: size))
+                } else {
+                    _ = try connection.read(exactly: Int(length))
+                }
             default:
                 throw Failure("Unsupported message type \(messageType) from the display server.")
             }
@@ -238,7 +314,7 @@ public final class VNCClient: @unchecked Sendable {
             case .desktopSize:
                 resizeFramebuffer(width: width, height: height)
                 needsFullUpdate = true
-            case .qemuExtendedKeyEvent:
+            case .qemuExtendedKeyEvent, .extendedClipboard:
                 break
             case .none:
                 throw Failure("Unsupported encoding \(encoding) from the display server.")
@@ -320,7 +396,7 @@ public final class VNCClient: @unchecked Sendable {
     }
 }
 
-private extension Data {
+extension Data {
     mutating func appendBigEndian<T: FixedWidthInteger>(_ value: T) {
         Swift.withUnsafeBytes(of: value.bigEndian) { append(contentsOf: $0) }
     }

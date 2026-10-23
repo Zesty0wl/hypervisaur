@@ -44,6 +44,10 @@ public extension VBMacConfiguration {
     }
 
     var sharingSummary: String {
+        guard systemType.supportsSharedFolders else {
+            return clipboardSharingEnabled ? "Clipboard" : "None"
+        }
+
         let foldersSum: String
         if sharedFolders.count > 1 {
             foldersSum = "\(sharedFolders.count) Folders"

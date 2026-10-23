@@ -67,6 +67,18 @@ struct QEMULaunchConfigurationTests {
         #expect(!arguments.contains("ramfb"))
     }
 
+    @Test(arguments: [true, false])
+    func clipboardIsSharedThroughTheSPICEAgentPort(enabled: Bool) throws {
+        var vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        vm.configuration.clipboardSharingEnabled = enabled
+
+        let arguments = try makeConfiguration(for: vm).arguments()
+
+        #expect(arguments.contains("qemu-vdagent,id=vdagent,clipboard=on") == enabled)
+        #expect(arguments.contains("virtserialport,bus=vbserial.0,chardev=vdagent,name=com.redhat.spice.0") == enabled)
+    }
+
     @Test func commasInPathsAreEscaped() throws {
         let vm = try makeWindowsMachine(named: "Windows, ARM")
         try createBootDisk(for: vm)

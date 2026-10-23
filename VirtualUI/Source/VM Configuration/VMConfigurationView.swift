@@ -124,7 +124,7 @@ struct VMConfigurationView: View {
 
     private var showDisplaySection: Bool { systemType.supportsDisplayConfiguration }
 
-    private var showSharingSection: Bool { systemType.supportsSharedFolders }
+    private var showSharingSection: Bool { systemType.supportsSharedFolders || systemType.supportsClipboardSharing }
 
     private var showTemplatePicker: Bool { templatesController.hasTemplates(for: viewModel.config.systemType) }
 

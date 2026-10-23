@@ -5,12 +5,16 @@ import CryptoKit
 ///
 /// Windows doesn't include drivers for any of the network adapters that QEMU can emulate. Red Hat's virtio drivers are signed
 /// by Microsoft and available for ARM, and UTM publishes them on GitHub as part of its guest tools. Only the drivers for
-/// Windows 11 on ARM are kept, along with their license.
+/// Windows 11 on ARM are kept, along with their license, and the SPICE agent that shares the clipboard.
 public enum WindowsDrivers {
     public static let version = "0.1.271"
 
     /// Identifies what's kept from the guest tools, so that the drivers are installed again when that changes.
-    static let contentsVersion = "\(version)-2"
+    static let contentsVersion = "\(version)-3"
+
+    /// The folder with the SPICE agent, which shares the clipboard with the Mac.
+    static let clipboardAgentFolderName = "SPICEAgent"
+    static let clipboardAgentFileNames = ["vdagent.exe", "vdservice.exe"]
 
     static let sourceURL = URL(string: "https://github.com/utmapp/qemu/releases/download/v10.0.2-utm/utm-guest-tools-0.1.271.iso")!
     static let sourceSHA256 = "65b6a69b392ee01dd314c10f3dad9ebbf9c4160be43f5f0dd6bb715944d9095b"
@@ -33,10 +37,21 @@ public enum WindowsDrivers {
         FileManager.default.fileExists(atPath: directoryURL.appending(path: installedMarkerName).path)
     }
 
+    /// Whether an earlier version of the drivers is installed, which means that Windows virtual machines have been used,
+    /// and the drivers should be updated without asking.
+    static var isEarlierVersionInstalled: Bool {
+        guard !isInstalled else { return false }
+
+        let versions = (try? FileManager.default.contentsOfDirectory(atPath: directoryURL.deletingLastPathComponent().path)) ?? []
+        return versions.contains { !$0.hasPrefix(".") }
+    }
+
     /// Downloads the guest tools, verifies them, and keeps the drivers for Windows 11 on ARM.
     ///
     /// - Parameter onProgress: Called with the fraction of the download that's complete.
     public static func install(onOutput: @escaping @Sendable (String) -> Void, onProgress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
+        _ = try sevenZipURL()
+
         onOutput("Downloading \(sourceURL.absoluteString)")
 
         let directoryURL = FileManager.default.temporaryDirectory.appending(path: "VirtualBuddyDrivers-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -107,12 +122,61 @@ public enum WindowsDrivers {
         let drivers = try extractDrivers(from: mountPoint, to: stagingURL)
         onOutput("Found ARM64 drivers: \(drivers.joined(separator: ", "))")
 
+        try await extractClipboardAgent(from: mountPoint, to: stagingURL)
+        onOutput("Found the SPICE agent for ARM64")
+
         FileManager.default.createFile(atPath: stagingURL.appending(path: installedMarkerName).path, contents: Data(contentsVersion.utf8))
 
         if FileManager.default.fileExists(atPath: destinationURL.path) {
             try FileManager.default.removeItem(at: destinationURL)
         }
         try FileManager.default.moveItem(at: stagingURL, to: destinationURL)
+
+        removeOtherVersions(besides: destinationURL)
+    }
+
+    private static func removeOtherVersions(besides destinationURL: URL) {
+        let parentURL = destinationURL.deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: parentURL.path)) ?? []
+
+        for name in names where name != destinationURL.lastPathComponent && !name.hasPrefix(".") {
+            try? FileManager.default.removeItem(at: parentURL.appending(path: name, directoryHint: .isDirectory))
+        }
+    }
+
+    /// Takes the SPICE agent for ARM from UTM's guest tools installer, which is an NSIS installer that 7-Zip can unpack.
+    /// The rest of the installer isn't used, since it also installs older drivers and services that Windows on ARM doesn't need.
+    static func extractClipboardAgent(from mountPoint: URL, to destinationURL: URL) async throws {
+        let installerName = try FileManager.default.contentsOfDirectory(atPath: mountPoint.path)
+            .first { $0.hasPrefix("utm-guest-tools") && $0.hasSuffix(".exe") }
+        guard let installerName else {
+            throw Failure("The Windows guest tools don’t include the installer with the clipboard agent.")
+        }
+
+        let agentURL = destinationURL.appending(path: clipboardAgentFolderName, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: agentURL, withIntermediateDirectories: true)
+
+        let installerURL = mountPoint.appending(path: installerName)
+        try await HostCommand.run(
+            try sevenZipURL(),
+            ["e", "-y", "-bso0", "-bsp0", "-o\(agentURL.path)", installerURL.path] + clipboardAgentFileNames.map { "ARM64/\($0)" }
+        )
+
+        for name in clipboardAgentFileNames where !FileManager.default.fileExists(atPath: agentURL.appending(path: name).path) {
+            throw Failure("The Windows guest tools don’t include \(name) for ARM.")
+        }
+    }
+
+    private static func sevenZipURL() throws -> URL {
+        guard let brew = Homebrew.current else {
+            throw Failure("Homebrew is needed to install 7-Zip, which unpacks the clipboard agent for Windows.")
+        }
+
+        let url = QEMUToolchain(homebrew: brew).sevenZipURL
+        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+            throw Failure("7-Zip is needed to unpack the clipboard agent for Windows. Install it with “brew install sevenzip”.")
+        }
+        return url
     }
 
     /// Where each driver is taken from in the guest tools, if not `w11/ARM64`.

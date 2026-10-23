@@ -25,6 +25,9 @@ struct QEMULaunchConfiguration {
     /// The size of the virtio GPU's display when Windows starts.
     static let virtioGPUDisplaySizeRange = (width: 640...7680, height: 480...4320)
 
+    /// The port that the SPICE agent in the guest looks for.
+    static let spiceAgentPortName = "com.redhat.spice.0"
+
     func arguments() throws -> [String] {
         let configuration = model.configuration
         let hardware = configuration.hardware
@@ -82,6 +85,14 @@ struct QEMULaunchConfiguration {
             "-device", "virtserialport,bus=vbserial.0,chardev=vbstatus,name=\(WindowsGuestStatus.portName)",
             "-pidfile", model.qemuPIDFileURL.path,
         ]
+
+        /// The SPICE agent in the guest shares its clipboard through this port, which QEMU relays to the display connection.
+        if model.configuration.clipboardSharingEnabled {
+            arguments += [
+                "-chardev", "qemu-vdagent,id=vdagent,clipboard=on",
+                "-device", "virtserialport,bus=vbserial.0,chardev=vdagent,name=\(Self.spiceAgentPortName)",
+            ]
+        }
 
         arguments += [
             "-display", "none",

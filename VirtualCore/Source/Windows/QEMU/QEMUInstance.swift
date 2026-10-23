@@ -69,6 +69,7 @@ final class QEMUInstance: VMEngineInstance {
     private func prepareDevices(forInstallation: Bool) async throws -> QEMUVirtualMachine.Devices {
         let model = virtualMachineModel
         let installDiskURL = try await prepareInstallDisk(forInstallation: forInstallation)
+        await updateDriversIfNeeded()
         let driversDiskURL = try await WindowsDriversDisk.prepare(for: model)
 
         /// Windows Setup installs the drivers from the drivers disk before it finishes, as long as it hasn't got that far yet.
@@ -79,6 +80,23 @@ final class QEMUInstance: VMEngineInstance {
         let displayAdapter: QEMULaunchConfiguration.DisplayAdapter = installDiskURL == nil && model.windowsGuestDriversInstalled ? .virtioGPU : .framebuffer
 
         return QEMUVirtualMachine.Devices(installDiskURL: installDiskURL, driversDiskURL: driversDiskURL, displayAdapter: displayAdapter)
+    }
+
+    /// What's installed in Windows from the drivers disk changes, such as when the clipboard agent was added, so the drivers
+    /// are updated when a virtual machine starts if an earlier version was installed. If that fails, the virtual machine
+    /// starts without the drivers disk.
+    private func updateDriversIfNeeded() async {
+        guard WindowsDrivers.isEarlierVersionInstalled else { return }
+
+        logger.notice("Updating the Windows drivers")
+
+        do {
+            try await WindowsDrivers.install(onOutput: { [logger] line in
+                logger.info("\(line, privacy: .public)")
+            })
+        } catch {
+            logger.error("Couldn't update the Windows drivers: \(error, privacy: .public)")
+        }
     }
 
     /// Windows signs in by itself once an unattended installation has finished, still using the framebuffer and with the

@@ -12,7 +12,12 @@ struct SharingConfigurationView: View {
     @Binding var configuration: VBMacConfiguration
 
     var body: some View {
-        SharedFoldersManagementView(configuration: $configuration)
+        if configuration.systemType.supportsSharedFolders {
+            SharedFoldersManagementView(configuration: $configuration)
+        } else {
+            Toggle("Share Clipboard", isOn: $configuration.clipboardSharingEnabled)
+                .help("Share text on the clipboard between your Mac and the virtual machine.")
+        }
     }
 }
 

@@ -158,6 +158,7 @@ final class QEMUFramebufferView: NSView {
 
         inputToggleMonitor.setWindow(nil)
         NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
 
         if newWindow == nil {
             stopObservingFrames()
@@ -174,10 +175,16 @@ final class QEMUFramebufferView: NSView {
         observeFramesIfNeeded()
 
         NotificationCenter.default.addObserver(self, selector: #selector(windowDidResignKey), name: NSWindow.didResignKeyNotification, object: window)
+        NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey), name: NSWindow.didBecomeKeyNotification, object: window)
 
         if eventDeliveryMask.allowsKeyboardEvents {
             window.makeFirstResponder(self)
         }
+    }
+
+    /// Text copied on the Mac before the guest's clipboard agent started can be pasted once the window is back in use.
+    @objc private func windowDidBecomeKey(_ notification: Notification) {
+        machine?.offerClipboardToGuest()
     }
 
     @objc private func windowDidResignKey(_ notification: Notification) {

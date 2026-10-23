@@ -12,7 +12,9 @@ These are installed separately, or downloaded when they're needed, and run as se
 | [EDK2 firmware](https://github.com/tianocore/edk2) | BSD-2-Clause-Patent | UEFI firmware for Windows virtual machines, from the QEMU Homebrew package |
 | [swtpm](https://github.com/stefanberger/swtpm) | BSD-3-Clause | TPM for Windows virtual machines. Installed with Homebrew |
 | [wimlib](https://wimlib.net) | GPL-3.0 or LGPL-3.0 | Prepares the Windows installer. Installed with Homebrew |
+| [7-Zip](https://www.7-zip.org) | LGPL-2.1 and BSD-3-Clause | Unpacks the SPICE agent from UTM's guest tools. Installed with Homebrew |
 | [virtio-win drivers](https://github.com/virtio-win/kvm-guest-drivers-windows) | BSD-3-Clause | Drivers installed in Windows virtual machines, from [UTM's guest tools](https://github.com/utmapp/qemu/releases) |
+| [SPICE agent for Windows](https://gitlab.freedesktop.org/spice/win32/vd_agent) | GPL-2.0-or-later | Shares the clipboard with Windows virtual machines. Installed in them from [UTM's guest tools](https://github.com/utmapp/qemu/releases) |
 | [USB ID Repository](http://www.linux-usb.org/usb-ids.html) | BSD-3-Clause or GPL-2.0 | Names of USB devices, downloaded from [usbids/usbids](https://github.com/usbids/usbids) |
 
 ## Software that Hypervisaur includes
