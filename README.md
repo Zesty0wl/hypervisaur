@@ -29,7 +29,7 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, and a server th
 
 ## Installing
 
-Download the latest release from the [Releases](../../releases) page, open the disk image and drag Hypervisaur to your Applications folder.
+Download the installer package from the latest release on the [Releases](../../releases) page and open it. It installs Hypervisaur in your Applications folder.
 
 Hypervisaur doesn't update itself yet. Check the Releases page for new versions.
 
@@ -96,7 +96,7 @@ Hypervisaur builds with Xcode 26 or later.
 
 The project's targets and modules keep VirtualBuddy's names so that changes from VirtualBuddy can still be merged.
 
-To build a notarized disk image for release, run `Scripts/release.sh` with a Developer ID certificate, a Developer ID provisioning profile and an App Store Connect API key. The script describes what it needs.
+To build a notarized installer package for release, run `Scripts/release.sh` with a Developer ID certificate, a Developer ID provisioning profile and an App Store Connect API key. The script describes what it needs.
 
 ## Acknowledgements
 
