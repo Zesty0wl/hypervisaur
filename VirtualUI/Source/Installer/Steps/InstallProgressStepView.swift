@@ -46,7 +46,7 @@ struct InstallProgressStepView: View {
             VirtualBuddyMonoProgressView(progress: progress, status: status, style: style)
                 .textSelection(.enabled)
         } else if let virtualMachine = viewModel.virtualMachine {
-            SwiftUIVMView(controllerState: .constant(.running(virtualMachine)), captureSystemKeysEnabled: false, isDFUModeVM: false, automaticallyReconfiguresDisplay: .constant(false))
+            SwiftUIVMView(controllerState: .constant(.running(.virtualization(virtualMachine))), captureSystemKeysEnabled: false, isDFUModeVM: false, automaticallyReconfiguresDisplay: .constant(false))
                 .virtualMachineEventDeliveryMask(.none)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

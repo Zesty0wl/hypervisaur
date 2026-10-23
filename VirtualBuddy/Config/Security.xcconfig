@@ -1,7 +1,7 @@
 #include "Signing.xcconfig"
 
 // This team ID is used for code signing requirements
-VB_DEVELOPMENT_TEAM = 8C7439RJLG
+VB_DEVELOPMENT_TEAM = 8352865GK4
 
 // #defines a CURRENT_PROJECT_VERSION_FOR_CODE_REQUIREMENTS macro that can be used in code signing verification code
 CURRENT_PROJECT_VERSION_FOR_CODE_REQUIREMENTS_STR=@"$(CURRENT_PROJECT_VERSION)"

@@ -176,20 +176,30 @@ public struct VirtualMachineSessionView: View {
     }
 
     @ViewBuilder
-    private func vmView(with vm: VZVirtualMachine, onInputToggleHold: ((VMInputToggleHoldEvent) -> Void)? = nil) -> some View {
-        SwiftUIVMView(
-            controllerState: .constant(.running(vm)),
-            captureSystemKeysEnabled: controller.virtualMachineModel.configuration.captureSystemKeys,
-            isDFUModeVM: controller.options.bootInDFUMode,
-            vmECID: controller.virtualMachineModel.ECID,
-            automaticallyReconfiguresDisplay: .constant(controller.virtualMachineModel.configuration.hardware.displayDevices.count > 0 ? controller.virtualMachineModel.configuration.hardware.displayDevices[0].automaticallyReconfiguresDisplay : false),
-            onInputToggleHold: onInputToggleHold
-        )
-        .virtualMachineEventDeliveryMask(ui.eventDeliveryMask)
+    private func vmView(with runtime: VMRuntime, onInputToggleHold: ((VMInputToggleHoldEvent) -> Void)? = nil) -> some View {
+        switch runtime {
+        case .virtualization:
+            SwiftUIVMView(
+                controllerState: .constant(.running(runtime)),
+                captureSystemKeysEnabled: controller.virtualMachineModel.configuration.captureSystemKeys,
+                isDFUModeVM: controller.options.bootInDFUMode,
+                vmECID: controller.virtualMachineModel.ECID,
+                automaticallyReconfiguresDisplay: .constant(controller.virtualMachineModel.configuration.hardware.displayDevices.count > 0 ? controller.virtualMachineModel.configuration.hardware.displayDevices[0].automaticallyReconfiguresDisplay : false),
+                onInputToggleHold: onInputToggleHold
+            )
+            .virtualMachineEventDeliveryMask(ui.eventDeliveryMask)
+        case .qemu(let machine):
+            QEMUDisplayView(
+                machine: machine,
+                captureSystemKeysEnabled: controller.virtualMachineModel.configuration.captureSystemKeys,
+                onInputToggleHold: onInputToggleHold
+            )
+            .virtualMachineEventDeliveryMask(ui.eventDeliveryMask)
+        }
     }
     
     @ViewBuilder
-    private func pausedView<Overlay: View>(with vm: VZVirtualMachine, @ViewBuilder overlay: () -> Overlay) -> some View {
+    private func pausedView<Overlay: View>(with vm: VMRuntime, @ViewBuilder overlay: () -> Overlay) -> some View {
         ZStack {
             vmView(with: vm)
 

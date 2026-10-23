@@ -34,4 +34,21 @@ public extension BlurHashToken {
         value: "UsLn]CG1I;t19uxAR$jJOXjEj=ayn%fkjubI",
         size: 4
     )
+
+    /// Hardcoded VirtualBuddy background blur hash for Windows VMs.
+    static let virtualBuddyBackgroundWindows = BlurHashToken(
+        value: "Uh3CSYpyaKaLpfkqaeaea0aKkCkCaMaLkCkB",
+        size: 4
+    )
+}
+
+public extension VBGuestType {
+    /// The background for virtual machines of this type that don't have artwork of their own.
+    var defaultBackgroundHash: BlurHashToken {
+        switch self {
+        case .mac: .virtualBuddyBackground
+        case .linux: .virtualBuddyBackgroundLinux
+        case .windows: .virtualBuddyBackgroundWindows
+        }
+    }
 }

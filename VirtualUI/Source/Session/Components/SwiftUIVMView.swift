@@ -32,7 +32,7 @@ struct VMEventDeliveryMask: OptionSet, Sendable, CustomStringConvertible {
 }
 
 
-private extension EnvironmentValues {
+extension EnvironmentValues {
     @Entry var virtualMachineEventDeliveryMask = VMEventDeliveryMask.all
 }
 
@@ -72,8 +72,8 @@ struct SwiftUIVMView: NSViewControllerRepresentable {
         nsViewController.eventDeliveryMask = context.environment.virtualMachineEventDeliveryMask
         nsViewController.inputToggleHoldHandler = onInputToggleHold
 
-        if case .running(let vm) = controllerState {
-            nsViewController.virtualMachine = vm
+        if case .running(let runtime) = controllerState {
+            nsViewController.virtualMachine = runtime.virtualMachine
         } else {
             nsViewController.virtualMachine = nil
         }
@@ -303,79 +303,22 @@ final class VirtualBuddyVMView: VZVirtualMachineView {
     /// Called with the progress of the shortcuts that toggle input devices when held down.
     /// The shortcuts are only enabled when a handler is set.
     var inputToggleHoldHandler: ((VMInputToggleHoldEvent) -> Void)? {
-        didSet {
-            inputToggleHoldRecognizer.handler = inputToggleHoldHandler
-            updateInputToggleMonitoring()
-        }
+        get { inputToggleMonitor.handler }
+        set { inputToggleMonitor.handler = newValue }
     }
 
-    private lazy var inputToggleHoldRecognizer = VMInputToggleHoldRecognizer()
-
-    private var inputToggleEventMonitor: Any?
-
-    private func updateInputToggleMonitoring() {
-        let shouldMonitor = window != nil && inputToggleHoldHandler != nil
-
-        guard shouldMonitor != (inputToggleEventMonitor != nil) else { return }
-
-        if shouldMonitor {
-            startInputToggleMonitoring()
-        } else {
-            stopInputToggleMonitoring()
-        }
-    }
-
-    private func startInputToggleMonitoring() {
-        /// The shortcuts must be recognized even when the view is not the first responder, which is the case when
-        /// keyboard events are not being delivered to the guest, so the events are observed before they're dispatched.
-        inputToggleEventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
-        ) { [weak self] event in
-            self?.observeInputToggleEvent(event)
-            return event
-        }
-
-        NotificationCenter.default.addObserver(self, selector: #selector(windowDidResignKey), name: NSWindow.didResignKeyNotification, object: window)
-    }
-
-    private func stopInputToggleMonitoring() {
-        if let inputToggleEventMonitor {
-            NSEvent.removeMonitor(inputToggleEventMonitor)
-            self.inputToggleEventMonitor = nil
-        }
-
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
-
-        inputToggleHoldRecognizer.reset()
-    }
-
-    private func observeInputToggleEvent(_ event: NSEvent) {
-        guard let window, event.window === window, window.isKeyWindow else { return }
-
-        switch event.type {
-        case .flagsChanged:
-            /// Modifier keys pressed while a mouse button is down are part of a click or drag in the guest.
-            inputToggleHoldRecognizer.modifiersChanged(to: NSEvent.pressedMouseButtons == 0 ? event.modifierFlags : [])
-        default:
-            /// Any other key or mouse button means the modifier keys are being held down for something else.
-            inputToggleHoldRecognizer.interrupt()
-        }
-    }
-
-    @objc private func windowDidResignKey(_ notification: Notification) {
-        inputToggleHoldRecognizer.reset()
-    }
+    private let inputToggleMonitor = VMInputToggleEventMonitor()
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
 
-        stopInputToggleMonitoring()
+        inputToggleMonitor.setWindow(nil)
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
 
-        updateInputToggleMonitoring()
+        inputToggleMonitor.setWindow(window)
     }
 
     // MARK: Event Filtering

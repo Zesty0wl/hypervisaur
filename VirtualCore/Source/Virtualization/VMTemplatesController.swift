@@ -13,6 +13,7 @@ import Combine
 public final class VMTemplatesController {
     public private(set) var templatesForMacGuest = [VBConfigurationTemplate]()
     public private(set) var templatesForLinuxGuest = [VBConfigurationTemplate]()
+    public private(set) var templatesForWindowsGuest = [VBConfigurationTemplate]()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -26,11 +27,12 @@ public final class VMTemplatesController {
         switch guestType {
         case .mac: !templatesForMacGuest.isEmpty
         case .linux: !templatesForLinuxGuest.isEmpty
+        case .windows: !templatesForWindowsGuest.isEmpty
         }
     }
 
     public func template(id: VBConfigurationTemplate.ID) -> VBConfigurationTemplate? {
-        (templatesForMacGuest + templatesForLinuxGuest).first { $0.id == id }
+        (templatesForMacGuest + templatesForLinuxGuest + templatesForWindowsGuest).first { $0.id == id }
     }
 
     private func loadTemplates(_ virtualMachines: [VBVirtualMachine]) {
@@ -41,12 +43,16 @@ public final class VMTemplatesController {
 
         let forMac = templates.filter { $0.systemType == .mac }
         let forLinux = templates.filter { $0.systemType == .linux }
+        let forWindows = templates.filter { $0.systemType == .windows }
 
         if forMac != templatesForMacGuest {
             templatesForMacGuest = forMac
         }
         if forLinux != templatesForLinuxGuest {
             templatesForLinuxGuest = forLinux
+        }
+        if forWindows != templatesForWindowsGuest {
+            templatesForWindowsGuest = forWindows
         }
     }
 }

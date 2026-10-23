@@ -6,7 +6,8 @@ final class VirtualMachineCreationTests: XCTestCase {
     private var creators: [(URL) throws -> VBVirtualMachine] {
         [
             { try VBVirtualMachine(bundleURL: $0, isNewInstall: true) },
-            { try VBVirtualMachine(creatingLinuxMachineAt: $0) }
+            { try VBVirtualMachine(creatingLinuxMachineAt: $0) },
+            { try VBVirtualMachine(creatingWindowsMachineAt: $0) }
         ]
     }
 

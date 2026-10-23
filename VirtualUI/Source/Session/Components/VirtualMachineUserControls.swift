@@ -42,7 +42,7 @@ extension VBMacConfiguration {
             case .mouse: "magicmouse"
             case .trackpad: "rectangle.and.hand.point.up.left.filled"
             }
-        case .linux:
+        case .linux, .windows:
             switch hardware.pointingDevice.kind {
             case .mouse: "computermouse"
             case .trackpad: "rectangle.and.hand.point.up.left.filled"

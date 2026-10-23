@@ -142,6 +142,11 @@ final class DeepLinkHandler {
         }
 
         func getVM(named name: String) throws -> VBVirtualMachine {
+            /// Virtual machines that were just created by another process, such as `vbmcp`, may not have been noticed yet.
+            if library.virtualMachine(named: name) == nil {
+                library.loadMachines()
+            }
+
             guard let vm = library.virtualMachine(named: name) else {
                 throw Failure("Couldn't find a virtual machine with the name \(name.wrappedInSmartQuotes).")
             }

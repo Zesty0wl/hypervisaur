@@ -13,6 +13,7 @@ struct DisplayConfigurationView: View {
     @Binding var device: VBDisplayDevice
     @Binding var selectedPreset: VBDisplayPreset?
     var canChangePPI: Bool
+    var canReconfigureAutomatically = true
 
     @Environment(\.resolvedRestoreImage)
     private var resolvedRestoreImage
@@ -56,7 +57,7 @@ struct DisplayConfigurationView: View {
             )
         }
         
-        if VBDisplayDevice.automaticallyReconfiguresDisplaySupportedByHost {
+        if canReconfigureAutomatically, VBDisplayDevice.automaticallyReconfiguresDisplaySupportedByHost {
             Group {
                 if displayResizeUnsupported {
                     let helpMessage = displayResizeStatus?.supportMessage ?? "Not supported."

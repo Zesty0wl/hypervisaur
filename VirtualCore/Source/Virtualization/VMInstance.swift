@@ -165,6 +165,8 @@ public final class VMInstance: NSObject, ObservableObject {
             } else {
                 installDevice = []
             }
+        case .windows:
+            throw Failure("Windows virtual machines run with QEMU, not Virtualization.")
         }
         let c = VZVirtualMachineConfiguration()
 
@@ -317,7 +319,7 @@ public final class VMInstance: NSObject, ObservableObject {
                 }
                 startOptions = macOptions
                 isRecoveryBoot = macOptions.startUpFromMacOSRecovery
-            case .linux:
+            case .linux, .windows:
                 startOptions = VZVirtualMachineStartOptions()
             }
 

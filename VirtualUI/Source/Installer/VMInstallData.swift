@@ -40,7 +40,7 @@ struct VMInstallData: Hashable, Codable {
             {
                 backgroundHash = BlurHashToken(value: value)
             } else {
-                backgroundHash = systemType == .mac ? .virtualBuddyBackground : .virtualBuddyBackgroundLinux
+                backgroundHash = systemType.defaultBackgroundHash
             }
         }
     }
@@ -98,6 +98,8 @@ extension VMInstallData {
             true // TODO: Implement
         case .done:
             true // TODO: Implement
+        case .dependencies:
+            true
         }
     }
 

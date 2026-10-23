@@ -24,6 +24,7 @@ public enum VBGuestType: String, Identifiable, Codable, CaseIterable, ProvidesEm
     
     case mac
     case linux
+    case windows
 
     public static var empty: VBGuestType { .mac }
 }

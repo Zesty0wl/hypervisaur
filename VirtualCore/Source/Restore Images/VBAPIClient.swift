@@ -95,6 +95,9 @@ public final class VBAPIClient {
 
     @MainActor
     func performCatalogFetch(for guest: VBGuestType, skipCache: Bool) async throws -> SoftwareCatalog {
+        /// Installers for guests without a catalog are always provided by the user.
+        guard guest.restoreImagesAPIPath != nil else { return .empty }
+
         #if DEBUG
         guard !ProcessInfo.isSwiftUIPreview, !UserDefaults.standard.bool(forKey: "VBForceBuiltInSoftwareCatalog") else {
             logger.debug("Forcing built-in catalog")
@@ -126,8 +129,12 @@ public final class VBAPIClient {
     }
 
     func fetchRemoteCatalog(for guest: VBGuestType, skipCache: Bool) async throws -> SoftwareCatalog {
+        guard let path = guest.restoreImagesAPIPath else {
+            throw "There's no software catalog for \(guest.rawValue) guests."
+        }
+
         let req = try request(
-            for: guest.restoreImagesAPIPath,
+            for: path,
             cachePolicy: skipCache ? .reloadIgnoringLocalAndRemoteCacheData : .useProtocolCachePolicy
         )
 
@@ -152,6 +159,8 @@ public final class VBAPIClient {
             "ipsws_v2"
         case .linux:
             "linux_v2"
+        case .windows:
+            throw "There's no built-in software catalog for Windows guests."
         }
 
         guard let url = Bundle.virtualCore.url(forResource: fileName, withExtension: "json", subdirectory: "SoftwareCatalog") else {
@@ -217,12 +226,14 @@ public final class VBAPIClient {
 }
 
 private extension VBGuestType {
-    var restoreImagesAPIPath: String {
+    var restoreImagesAPIPath: String? {
         switch self {
         case .mac:
             return "/restore/mac"
         case .linux:
             return "/restore/linux"
+        case .windows:
+            return nil
         }
     }
 }

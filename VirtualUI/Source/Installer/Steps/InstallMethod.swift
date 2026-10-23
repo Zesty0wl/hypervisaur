@@ -39,7 +39,7 @@ extension InstallMethod {
             switch type {
             case .mac:
                 return "Open custom IPSW file from local storage"
-            case .linux:
+            case .linux, .windows:
                 return "Open custom ISO file from local storage"
             }
             case .remoteOptions:
@@ -68,6 +68,8 @@ extension VBGuestType {
             return "Enter the macOS IPSW URL"
         case .linux:
             return "Enter the Linux ISO URL"
+        case .windows:
+            return "Enter the Windows ISO URL"
         }
     }
 

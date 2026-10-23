@@ -91,7 +91,7 @@ struct VMSessionConfigurationView: View {
         RoundedRectangle(cornerRadius: 18)
     }
 
-    private var showInstallDeviceOption: Bool { vm.configuration.systemType == .linux && vm.metadata.installImageURL != nil }
+    private var showInstallDeviceOption: Bool { vm.configuration.systemType != .mac && vm.metadata.installImageURL != nil }
 
     private var showRecoveryModeOption: Bool { vm.configuration.systemType == .mac }
 

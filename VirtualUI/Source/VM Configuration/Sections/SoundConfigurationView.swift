@@ -15,21 +15,26 @@ struct SoundConfigurationView: View {
     @ManagedValue(for: .disableMicrophoneInput, schema: VirtualBuddyManagedPreferences.schema, default: false)
     private var microphoneInputDisabled: Bool
 
+    @Environment(\.configurationGuestType)
+    private var guestType
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Toggle("Enable Sound", isOn: soundEnabled)
 
-            if hardware.soundDevices.isEmpty || microphoneInputDisabled {
-                Toggle("Enable Sound Input", isOn: .constant(false))
-                    .disabled(true)
-            } else {
-                Toggle("Enable Sound Input", isOn: $hardware.soundDevices[0].enableInput)
-            }
-            if microphoneInputDisabled {
-                ManagedRestrictionBannerView(title: "Microphone input is disabled by your organization.")
-                Text("Restart the VM to apply.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if guestType.supportsSoundInput {
+                if hardware.soundDevices.isEmpty || microphoneInputDisabled {
+                    Toggle("Enable Sound Input", isOn: .constant(false))
+                        .disabled(true)
+                } else {
+                    Toggle("Enable Sound Input", isOn: $hardware.soundDevices[0].enableInput)
+                }
+                if microphoneInputDisabled {
+                    ManagedRestrictionBannerView(title: "Microphone input is disabled by your organization.")
+                    Text("Restart the VM to apply.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -39,7 +44,9 @@ struct SoundConfigurationView: View {
             !hardware.soundDevices.isEmpty
         }, set: { newValue in
             if newValue, hardware.soundDevices.isEmpty {
-                hardware.soundDevices = [.default]
+                var device = VBSoundDevice.default
+                device.enableInput = guestType.supportsSoundInput
+                hardware.soundDevices = [device]
             } else {
                 hardware.soundDevices.removeAll()
             }

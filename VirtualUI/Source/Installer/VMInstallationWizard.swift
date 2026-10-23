@@ -53,7 +53,7 @@ public struct VMInstallationWizard: View {
 
     private var hideBottomBar: Bool {
         switch viewModel.step {
-        case .systemType, .restoreImageInput, .restoreImageSelection, .name:
+        case .systemType, .dependencies, .restoreImageInput, .restoreImageSelection, .name:
             false
         case .configuration, .download, .install, .done:
             true
@@ -69,6 +69,8 @@ public struct VMInstallationWizard: View {
                 switch viewModel.step {
                     case .systemType:
                         guestSystemTypeSelection
+                    case .dependencies:
+                        WindowsDependenciesStep()
                     case .restoreImageInput:
                         restoreImageURLInput
                     case .restoreImageSelection:
@@ -136,6 +138,7 @@ public struct VMInstallationWizard: View {
     private var dimBackground: Bool {
         switch viewModel.step {
         case .systemType: false
+        case .dependencies: false
         case .restoreImageInput: false
         case .restoreImageSelection: false
         case .name: false
@@ -250,7 +253,18 @@ public struct VMInstallationWizard: View {
 
     @ViewBuilder
     private var renameVM: some View {
-        VirtualMachineNameInputView(name: $viewModel.data.name, validationError: viewModel.nameValidationError)
+        VStack(spacing: 16) {
+            VirtualMachineNameInputView(name: $viewModel.data.name, validationError: viewModel.nameValidationError)
+
+            if viewModel.data.systemType == .windows {
+                WindowsAccountSetupView(
+                    isEnabled: $viewModel.windowsAutomaticSetup,
+                    accountName: $viewModel.windowsAccountName,
+                    password: $viewModel.windowsPassword,
+                    validationError: viewModel.windowsAccountValidationError
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -276,6 +290,7 @@ extension VMInstallationStep {
     var subtitle: String {
         switch self {
         case .systemType: "Choose Operating System"
+        case .dependencies: "Install Requirements"
         case .restoreImageInput: "Select Custom Restore Image"
         case .restoreImageSelection: "Choose Version"
         case .name: "Name Your Virtual Machine"

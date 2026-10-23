@@ -35,6 +35,7 @@ public extension SoftwareCatalog {
         switch guestType {
         case .mac: return .currentMacCatalog
         case .linux: return .currentLinuxCatalog
+        case .windows: return .empty
         }
     }
 
@@ -44,6 +45,8 @@ public extension SoftwareCatalog {
             self.currentMacCatalog = catalog
         case .linux:
             self.currentLinuxCatalog = catalog
+        case .windows:
+            break
         }
     }
 }
@@ -55,6 +58,8 @@ public extension CatalogGuestPlatform {
             self = .mac
         case .linux:
             self = .linux
+        case .windows:
+            self = .unknown
         }
     }
 }

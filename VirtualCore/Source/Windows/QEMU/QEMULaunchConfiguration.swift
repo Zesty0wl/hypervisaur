@@ -1,0 +1,187 @@
+import Foundation
+
+/// Describes how QEMU is launched for a Windows virtual machine.
+struct QEMULaunchConfiguration {
+    struct RuntimePaths {
+        var monitorSocket: URL
+        var displaySocket: URL
+        var tpmSocket: URL
+    }
+
+    enum DisplayAdapter: Equatable {
+        /// A framebuffer that the firmware and Windows can use without drivers, at a fixed size.
+        case framebuffer
+        /// A virtio GPU, which Windows can only use with its driver. Windows uses the size it has when Windows starts.
+        case virtioGPU
+    }
+
+    var model: VBVirtualMachine
+    var toolchain: QEMUToolchain
+    var runtimePaths: RuntimePaths
+    var installDiskURL: URL?
+    var driversDiskURL: URL?
+    var displayAdapter = DisplayAdapter.framebuffer
+
+    /// The size of the virtio GPU's display when Windows starts.
+    static let virtioGPUDisplaySizeRange = (width: 640...7680, height: 480...4320)
+
+    func arguments() throws -> [String] {
+        let configuration = model.configuration
+        let hardware = configuration.hardware
+
+        var arguments = [
+            "-name", "\(model.name.qemuOptionEscaped),debug-threads=on",
+            /// A virtual machine must not outlive the app, for example if it crashes. swtpm exits by itself when QEMU does.
+            "-run-with", "exit-with-parent=on",
+            "-nodefaults",
+            "-machine", "virt",
+            "-accel", "hvf",
+            "-cpu", "host",
+            "-smp", "\(hardware.cpuCount)",
+            "-m", "\(hardware.memorySize / .storageMegabyte)M",
+            "-rtc", "base=localtime",
+            /// Skips the firmware's countdown before it boots.
+            "-boot", "menu=on,splash-time=0",
+            "-drive", "if=pflash,format=raw,readonly=on,file=\(toolchain.firmwareCodeURL.path.qemuOptionEscaped)",
+            "-drive", "if=pflash,format=raw,file=\(model.windowsEFIVariablesURL.path.qemuOptionEscaped)",
+            "-device", displayDeviceArgument,
+            "-device", "qemu-xhci,id=xhci",
+            "-device", "usb-kbd,bus=xhci.0",
+            "-device", "usb-tablet,bus=xhci.0",
+            "-chardev", "socket,id=tpmchr,path=\(runtimePaths.tpmSocket.path.qemuOptionEscaped)",
+            "-tpmdev", "emulator,id=tpm0,chardev=tpmchr",
+            /// The physical presence interface is a RAM region that isn't aligned to the host page size, which the Hypervisor framework rejects.
+            "-device", "tpm-tis-device,tpmdev=tpm0,ppi=off",
+        ]
+
+        arguments += try storageArguments()
+        arguments += try networkArguments()
+        arguments += audioArguments()
+
+        /// The installer disk comes after the boot disk so that Windows Setup lists the boot disk first, and the firmware
+        /// only boots from it while the boot disk is empty. It's writable because Windows Setup doesn't recognize
+        /// the installer on a disk that rejects writes.
+        if let installDiskURL {
+            arguments += [
+                "-drive", "if=none,id=installer,format=raw,file=\(installDiskURL.path.qemuOptionEscaped),cache=writeback",
+                "-device", "nvme,drive=installer,serial=VBINSTALLER,bootindex=1",
+            ]
+        }
+
+        if let driversDiskURL {
+            arguments += [
+                "-drive", "if=none,id=drivers,format=raw,file=\(driversDiskURL.path.qemuOptionEscaped),cache=writeback",
+                "-device", "nvme,drive=drivers,serial=VBDRIVERS",
+            ]
+        }
+
+        /// QEMU empties the status file when it starts. See ``WindowsGuestStatus``.
+        arguments += [
+            "-device", "virtio-serial-pci,id=vbserial",
+            "-chardev", "file,id=vbstatus,path=\(model.windowsGuestStatusURL.path.qemuOptionEscaped)",
+            "-device", "virtserialport,bus=vbserial.0,chardev=vbstatus,name=\(WindowsGuestStatus.portName)",
+            "-pidfile", model.qemuPIDFileURL.path,
+        ]
+
+        arguments += [
+            "-display", "none",
+            "-vnc", "unix:\(runtimePaths.displaySocket.path.qemuOptionEscaped)",
+            "-qmp", "unix:\(runtimePaths.monitorSocket.path.qemuOptionEscaped),server=on,wait=off",
+            /// The guest starts once the display is connected, so that nothing that's shown during boot is missed.
+            "-S",
+        ]
+
+        return arguments
+    }
+
+    private var displayDeviceArgument: String {
+        switch displayAdapter {
+        case .framebuffer:
+            return "ramfb"
+        case .virtioGPU:
+            let display = model.configuration.hardware.displayDevices.first ?? .windowsDisplay
+            let widthRange = Self.virtioGPUDisplaySizeRange.width
+            let heightRange = Self.virtioGPUDisplaySizeRange.height
+            let width = min(max(display.width, widthRange.lowerBound), widthRange.upperBound)
+            let height = min(max(display.height, heightRange.lowerBound), heightRange.upperBound)
+            return "virtio-gpu-pci,xres=\(width),yres=\(height)"
+        }
+    }
+
+    /// The firmware boots from the devices with a boot index, in order, and doesn't try to boot from anything else,
+    /// such as the network or the drivers disk.
+    private func storageArguments() throws -> [String] {
+        var arguments = [String]()
+
+        let devices = model.configuration.hardware.storageDevices
+            .filter(\.isEnabled)
+            .sorted { $0.isBootVolume && !$1.isBootVolume }
+
+        for (index, device) in devices.enumerated() {
+            if case .managedImage(let image) = device.backing, image.format != .raw {
+                throw Failure("The disk image “\(device.displayName)” uses the \(image.format.displayName) format, which Windows virtual machines can’t use. Use a raw image instead.")
+            }
+
+            let url = model.diskImageURL(for: device)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw Failure("The disk image “\(device.displayName)” doesn’t exist at \(url.path).")
+            }
+
+            let driveID = "disk\(index)"
+            var drive = "if=none,id=\(driveID),format=raw,file=\(url.path.qemuOptionEscaped),cache=writeback,discard=unmap,detect-zeroes=unmap"
+            if device.isReadOnly { drive += ",readonly=on" }
+
+            arguments += ["-drive", drive]
+
+            let bootIndex = index == 0 && device.isBootVolume ? ",bootindex=0" : ""
+
+            if device.isUSBMassStorageDevice {
+                arguments += ["-device", "usb-storage,bus=xhci.0,drive=\(driveID),removable=on\(bootIndex)"]
+            } else {
+                arguments += ["-device", "nvme,drive=\(driveID),serial=\(Self.serialNumber(for: device))\(bootIndex)"]
+            }
+        }
+
+        return arguments
+    }
+
+    private func networkArguments() throws -> [String] {
+        var arguments = [String]()
+
+        for (index, device) in model.configuration.hardware.networkDevices.enumerated() {
+            guard device.kind == .NAT else {
+                throw Failure("Windows virtual machines only support NAT networking. Change the network device “\(device.name)” to NAT in the virtual machine’s settings.")
+            }
+
+            let netdevID = "net\(index)"
+            arguments += [
+                "-netdev", "user,id=\(netdevID)",
+                "-device", "virtio-net-pci,netdev=\(netdevID),mac=\(device.macAddress.lowercased())",
+            ]
+        }
+
+        return arguments
+    }
+
+    private func audioArguments() -> [String] {
+        guard model.configuration.hardware.soundDevices.contains(where: \.enableOutput) else { return [] }
+
+        return [
+            "-audiodev", "coreaudio,id=audio0",
+            "-device", "usb-audio,bus=xhci.0,audiodev=audio0",
+        ]
+    }
+
+    /// NVMe serial numbers are limited to 20 characters.
+    private static func serialNumber(for device: VBStorageDevice) -> String {
+        let characters = device.id.uppercased().filter { $0.isLetter || $0.isNumber }
+        return "VB" + String(characters.prefix(18))
+    }
+}
+
+private extension String {
+    /// Commas separate options in QEMU arguments, so they're escaped by doubling them.
+    var qemuOptionEscaped: String {
+        replacingOccurrences(of: ",", with: ",,")
+    }
+}

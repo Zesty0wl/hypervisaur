@@ -66,7 +66,7 @@ public final class VMLibraryController: ObservableObject {
 
     /// Identifiers for all VMs that are currently in a "booted" state (starting, booted, or paused).
     @Published public private(set) var bootedMachineIdentifiers = Set<VBVirtualMachine.ID>()
-    private let bootedInstances = NSMapTable<NSString, VMInstance>(keyOptions: [.objectPersonality, .strongMemory], valueOptions: [.objectPersonality, .weakMemory])
+    private let bootedInstances = NSMapTable<NSString, AnyObject>(keyOptions: [.objectPersonality, .strongMemory], valueOptions: [.objectPersonality, .weakMemory])
 
     /// Populated when ``bootedMachineIdentifiers`` is not empty, invalidated when the last booted machine identifier is unregistered via ``unregisterBootedVM(identifier:)``.
     private var preventTerminationAssertion: PreventTerminationAssertion?
@@ -561,7 +561,7 @@ extension NSWorkspace: @retroactive @unchecked Sendable { }
 
 public extension VMLibraryController {
     /// Adds virtual machine to the list of booted machines.
-    func registerBootedVM(_ instance: VMInstance) {
+    internal func registerBootedVM(_ instance: any VMEngineInstance) {
         let id = instance.virtualMachineModel.id
 
         logger.debug("Registering booted VM \(id.shortID, privacy: .public)")
@@ -573,7 +573,7 @@ public extension VMLibraryController {
     }
 
     /// Removes virtual machine from the list of booted machines.
-    func unregisterBootedVM(_ instance: VMInstance) {
+    internal func unregisterBootedVM(_ instance: any VMEngineInstance) {
         let id = instance.virtualMachineModel.id
         logger.debug("Unregistering booted VM \(id.shortID, privacy: .public)")
 
@@ -585,7 +585,7 @@ public extension VMLibraryController {
 
     /// Closes guest connections before the application exits.
     func stopGuestCommunication() async {
-        let instances = Array(bootedInstances.dictionaryRepresentation().values)
+        let instances = bootedInstances.dictionaryRepresentation().values.compactMap { $0 as? any VMEngineInstance }
         await withTaskGroup(of: Void.self) { group in
             for instance in instances {
                 group.addTask { await instance.stopGuestCommunication() }

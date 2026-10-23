@@ -120,6 +120,12 @@ struct VMConfigurationView: View {
 
     private var showProvisioningSection: Bool { systemType.supportsProvisioning }
 
+    private var showUSBDevicesSection: Bool { systemType.supportsUSBPassthrough }
+
+    private var showDisplaySection: Bool { systemType.supportsDisplayConfiguration }
+
+    private var showSharingSection: Bool { systemType.supportsSharedFolders }
+
     private var showTemplatePicker: Bool { templatesController.hasTemplates(for: viewModel.config.systemType) }
 
     var body: some View {
@@ -145,9 +151,13 @@ struct VMConfigurationView: View {
     
                 storage
 
-                usbDevices
+                if showUSBDevicesSection {
+                    usbDevices
+                }
 
-                display
+                if showDisplaySection {
+                    display
+                }
 
                 if showPointingDeviceSection {
                     pointingDevice
@@ -165,7 +175,9 @@ struct VMConfigurationView: View {
                     guestApp
                 }
 
-                sharing
+                if showSharingSection {
+                    sharing
+                }
             }
             /// This is required so that contents that have long text content won't cause the width to expand automatically.
             .frame(minWidth: 0, idealWidth: VMConfigurationSheet.minWidth)
@@ -314,14 +326,16 @@ struct VMConfigurationView: View {
             DisplayConfigurationView(
                 device: $viewModel.config.hardware.displayDevices[0],
                 selectedPreset: $viewModel.selectedDisplayPreset,
-                canChangePPI: showDisplayPPISection
+                canChangePPI: showDisplayPPISection,
+                canReconfigureAutomatically: systemType.supportsAutomaticDisplayConfiguration
             )
         } header: {
             SummaryHeader("Display", systemImage: "display", summary: viewModel.config.displaySummary) {
                 DisplayConfigurationView(
                     device: $viewModel.config.hardware.displayDevices[0],
                     selectedPreset: $viewModel.selectedDisplayPreset,
-                    canChangePPI: showDisplayPPISection
+                    canChangePPI: showDisplayPPISection,
+                canReconfigureAutomatically: systemType.supportsAutomaticDisplayConfiguration
                 )
                 .presetPicker
                 .frame(width: 24)
@@ -422,6 +436,7 @@ struct VMConfigurationTemplatePicker: View {
         switch configuration.systemType {
         case .mac: controller.templatesForMacGuest
         case .linux: controller.templatesForLinuxGuest
+        case .windows: controller.templatesForWindowsGuest
         }
     }
 

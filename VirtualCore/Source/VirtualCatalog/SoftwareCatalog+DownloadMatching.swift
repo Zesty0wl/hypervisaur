@@ -205,6 +205,8 @@ private extension SoftwareCatalog {
             return "macOS \(version.shortDescription)"
         case .linux:
             return "Linux \(version.shortDescription)"
+        case .windows:
+            return "Windows \(version.shortDescription)"
         }
     }
 

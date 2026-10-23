@@ -21,6 +21,8 @@ public enum VMInstallationStep: Int, Hashable, Codable {
     case download
     case install
     case done
+    /// Checks for the software that's needed on the host to run the guest. Added last to keep the raw values of saved installations.
+    case dependencies
 }
 
 @MainActor
@@ -71,7 +73,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
         switch step {
         case .systemType:
             false
-        case .restoreImageInput, .restoreImageSelection:
+        case .restoreImageInput, .restoreImageSelection, .dependencies:
             /// Only allow going back from restore image selection if a VM bundle has not been created yet.
             /// It's possible for this condition to be reached when user goes back after the name step,
             /// and we don't want the user to change the guest type after that.
@@ -98,6 +100,17 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
     @Published  var disableNextButton = false
     @Published private(set) var nameValidationError: String?
 
+    /// Whether Windows is installed without going through Windows Setup. The settings are kept in the virtual machine
+    /// rather than in the restorable state, since they may include a password.
+    @Published var windowsAutomaticSetup = true {
+        didSet { validate() }
+    }
+    @Published var windowsAccountName = WindowsUnattendedSetup.defaultAccountName {
+        didSet { validate() }
+    }
+    @Published var windowsPassword = ""
+    @Published private(set) var windowsAccountValidationError: String?
+
     private let library: VMLibraryController
 
     init(library: VMLibraryController, restoring restoreVM: VBVirtualMachine?) {
@@ -110,6 +123,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
         }
 
         validate()
+        observeHostDependencies()
     }
 
     init(library: VMLibraryController, restoringAt restoreURL: URL?, initialStep: Step? = nil) {
@@ -122,6 +136,15 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
         }
 
         validate()
+        observeHostDependencies()
+    }
+
+    /// The dependencies step can only continue once everything that's needed has been installed.
+    private func observeHostDependencies() {
+        WindowsHostDependencies.shared.$statuses
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.validate() }
+            .store(in: &cancellables)
     }
 
     private func restoreInstallation(with url: URL) {
@@ -146,6 +169,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
 
             self.data = restoredState.data
             self.machine = model
+            restoreWindowsSetup(from: model)
             self.step = restoredState.step
         } catch {
             assertionFailure("Couldn't restore install: \(error)")
@@ -189,7 +213,42 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
         if step == .name, machine == nil, FileManager.default.fileExists(atPath: newMachineURL.path) {
             nameValidationError = VBVirtualMachine.BundleAlreadyExistsError().localizedDescription
         }
-        disableNextButton = !data.canContinue(from: step) || nameValidationError != nil
+
+        windowsAccountValidationError = nil
+        if step == .name, data.systemType == .windows, windowsAutomaticSetup {
+            do {
+                try WindowsUnattendedSetup.validateAccountName(windowsAccountName)
+            } catch {
+                windowsAccountValidationError = error.localizedDescription
+            }
+        }
+
+        disableNextButton = !data.canContinue(from: step)
+            || nameValidationError != nil
+            || windowsAccountValidationError != nil
+            || (step == .dependencies && !WindowsHostDependencies.shared.allInstalled)
+    }
+
+    private func restoreWindowsSetup(from model: VBVirtualMachine) {
+        guard model.configuration.systemType == .windows else { return }
+
+        if let setup = try? model.windowsUnattendedSetup() {
+            windowsAutomaticSetup = true
+            windowsAccountName = setup.accountName
+            windowsPassword = setup.password ?? ""
+        } else {
+            windowsAutomaticSetup = false
+        }
+    }
+
+    private func saveWindowsSetup() throws {
+        guard data.systemType == .windows, let machine else { return }
+
+        if windowsAutomaticSetup {
+            try machine.saveWindowsUnattendedSetup(WindowsUnattendedSetup(accountName: windowsAccountName, password: windowsPassword))
+        } else {
+            try machine.removeWindowsUnattendedSetup()
+        }
     }
 
     private var newMachineURL: URL {
@@ -211,7 +270,20 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
 
         switch step {
         case .systemType:
-            step = .restoreImageSelection
+            if data.systemType.runsWithQEMU {
+                data.backgroundHash = data.systemType.defaultBackgroundHash
+                step = .dependencies
+            } else {
+                step = .restoreImageSelection
+            }
+        case .dependencies:
+            /// Selecting the installer calls this again once there is a file.
+            guard data.localRestoreImageURL != nil else {
+                selectInstallFile()
+                return
+            }
+
+            goNextAfterRestoreImageSelection()
         case .restoreImageInput:
             commitCustomRestoreImageURL()
 
@@ -226,6 +298,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
 
             do {
                 try prepareModel()
+                try saveWindowsSetup()
                 state = .idle
                 step = .configuration
             } catch let error as VBVirtualMachine.BundleAlreadyExistsError {
@@ -253,7 +326,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
             break
         case .restoreImageInput:
             selectInstallMethod(.remoteOptions)
-        case .restoreImageSelection:
+        case .restoreImageSelection, .dependencies:
             data.backgroundHash = .virtualBuddyBackground
             step = .systemType
         case .download, .install:
@@ -263,6 +336,9 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
             
             state = .idle
             step = .restoreImageSelection
+        case .name where data.systemType.runsWithQEMU, .configuration where data.systemType.runsWithQEMU:
+            data.resetRestoreImageSelection()
+            step = .dependencies
         case .name, .configuration:
             /// **NOTE:** When going back from configuration step, all configuration is lost due to how configuration saving is currently tied
             /// to the specific "continue" button in the configuration sheet view. This will be addressed alongside other configuration UI changes soon...
@@ -275,6 +351,8 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
     private func performActions(for step: Step) {
         defer { validate() }
 
+        buttonTitle = "Continue"
+
         switch step {
             case .systemType:
                 showNextButton = true
@@ -283,6 +361,9 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
                 validateCustomRemoteURL()
             case .restoreImageSelection:
                 showNextButton = true
+            case .dependencies:
+                showNextButton = true
+                buttonTitle = "Choose Windows Installer…"
             case .name:
                 showNextButton = true
             case .configuration:
@@ -480,6 +561,8 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
             model = try VBVirtualMachine(bundleURL: vmURL, isNewInstall: true)
         case .linux:
             model = try VBVirtualMachine(creatingLinuxMachineAt: vmURL)
+        case .windows:
+            model = try VBVirtualMachine(creatingWindowsMachineAt: vmURL)
         }
         model.metadata.backgroundHash = data.backgroundHash
 
@@ -508,6 +591,8 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
             startMacInstallation()
         case .linux:
             await startLinuxInstallation()
+        case .windows:
+            await startWindowsInstallation()
         case .none:
             state = .error("Missing VM model or system type")
         }
@@ -538,6 +623,52 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Windows is installed when the virtual machine first starts up. This prepares the copy of the installer that it starts up from.
+    private func startWindowsInstallation() async {
+        guard let installURL = data.localRestoreImageURL else {
+            state = .error("Missing install image URL")
+            return
+        }
+
+        guard let model = machine else {
+            state = .error("Missing VM model")
+            return
+        }
+
+        state = .loading(nil, "Preparing Windows Installer")
+
+        let task = Task { @MainActor in
+            do {
+                if let error = model.configuration.qemuSupportState.errors.first {
+                    throw Failure(error)
+                }
+
+                startPreventingAppTermination(forReason: "preparing the Windows installer")
+                defer { stopPreventingAppTermination() }
+
+                try await WindowsInstallDisk.create(from: installURL, at: model.windowsInstallDiskURL, setup: try model.windowsUnattendedSetup()) { progress in
+                    Task { @MainActor in
+                        guard self.installationTask?.isCancelled == false else { return }
+                        self.state = .loading(progress.fractionCompleted, progress.description)
+                    }
+                }
+
+                try Task.checkCancellation()
+
+                state = .idle
+                step = .done
+            } catch is CancellationError {
+                UILog("Windows installer preparation cancelled")
+            } catch {
+                state = .error(error.localizedDescription)
+            }
+        }
+
+        installationTask = task
+        await task.value
+        installationTask = nil
+    }
+
     private func handleVirtualMachineValidationError(_ error: VZError) {
         UILog("Validation failed with error \(error)")
 
@@ -549,7 +680,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
         case .invalidDiskImage, .invalidRestoreImage, .restoreImageLoadFailed:
             let imageType = switch data.systemType {
             case .mac: "restore image"
-            case .linux: "iso image"
+            case .linux, .windows: "iso image"
             }
             let detail = """
             The \(imageType) on your computer may be corrupted from a faulty download.

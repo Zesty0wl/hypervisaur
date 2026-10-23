@@ -19,6 +19,10 @@ public extension VBMacConfiguration {
             return hostSupportState
         }
 
+        guard !systemType.runsWithQEMU else {
+            return hostSupportState.merged(with: qemuSupportState)
+        }
+
         do {
             let config = try await VMInstance.makeConfiguration(for: tempModel)
 
@@ -43,7 +47,7 @@ public extension VBMacConfiguration {
         if !hardware.pointingDevice.kind.isSupportedByHost {
             errors.append("\(hardware.pointingDevice.kind.name) requires macOS 13 or later.")
         }
-        if hasSharedFolders {
+        if hasSharedFolders, systemType.supportsSharedFolders {
             warnings.append(VBMacConfiguration.fileSharingNotice)
         }
         if hardware.networkDevices.contains(where: { $0.kind == .bridge }), !VBNetworkDevice.appSupportsBridgedNetworking {
@@ -52,7 +56,7 @@ public extension VBMacConfiguration {
         if provisioningEnabled, provisioningSetup, !VBMacConfiguration.hostSupportsProvisioning {
             warnings.append(VBMacConfiguration.provisioningUnsupportedHostNotice)
         }
-        if !hardware.usbDevices.isEmpty, !VBMacConfiguration.hostSupportsUSBPassthrough {
+        if !hardware.usbDevices.isEmpty, systemType.supportsUSBPassthrough, !VBMacConfiguration.hostSupportsUSBPassthrough {
             warnings.append(VBMacConfiguration.usbPassthroughUnsupportedHostNotice)
         }
 
@@ -194,7 +198,34 @@ public extension VBKeyboardDevice.Kind {
 }
 
 public extension VBGuestType {
-    var isSupportedByHost: Bool { true }
+    var isSupportedByHost: Bool {
+        switch self {
+        case .mac, .linux:
+            return true
+        case .windows:
+            /// Windows for ARM runs with the Hypervisor framework, which can only run guests of the host's architecture.
+            #if arch(arm64)
+            return true
+            #else
+            return false
+            #endif
+        }
+    }
+
+    /// Guests that Virtualization can't run are run with QEMU instead.
+    var runsWithQEMU: Bool { self == .windows }
+
+    var supportsSharedFolders: Bool { self != .windows }
+
+    var supportsClipboardSharing: Bool { self == .linux }
+
+    var supportsBridgedNetworking: Bool { self != .windows }
+
+    var supportsDisplayConfiguration: Bool { true }
+
+    var supportsSoundInput: Bool { self != .windows }
+
+    var supportsUSBPassthrough: Bool { self != .windows }
 
     static let supportedByHost: [VBGuestType] = {
         allCases.filter(\.isSupportedByHost)
@@ -206,6 +237,8 @@ public extension VBGuestType {
 
     var supportsDisplayPPI: Bool { self == .mac }
 
+    var supportsAutomaticDisplayConfiguration: Bool { self != .windows }
+
     var supportsRosettaMount: Bool { self == .linux }
 
     var supportsStateRestoration: Bool { self == .mac }
@@ -214,6 +247,7 @@ public extension VBGuestType {
         switch self {
         case .mac: return [.ipsw]
         case .linux: return [.iso, .img]
+        case .windows: return [.iso]
         }
     }
 

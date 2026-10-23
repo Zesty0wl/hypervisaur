@@ -110,12 +110,12 @@ public enum VMState: Equatable {
     case idle
     case starting(_ message: String?)
     case resizingDisk(_ message: String?)
-    case running(VZVirtualMachine)
-    case paused(VZVirtualMachine)
+    case running(VMRuntime)
+    case paused(VMRuntime)
     /// The virtual machine's session is being saved. It's paused while this happens.
-    case saving(VZVirtualMachine, SavedSessionPhase)
+    case saving(VMRuntime, SavedSessionPhase)
     /// A saved session is being restored. The virtual machine is constructed during this operation.
-    case restoring(VZVirtualMachine?, SavedSessionPhase)
+    case restoring(VMRuntime?, SavedSessionPhase)
     /// Not running, with a session saved and ready to be resumed.
     case saved(VBSavedSessionDescriptor)
     /// A saved session exists, but it can't be resumed without a decision from the user.
@@ -211,22 +211,47 @@ public final class VMController: ObservableObject {
         }
     }
 
-    private var instance: VMInstance?
-    
-    private func createInstance() throws -> VMInstance {
+    private var instance: (any VMEngineInstance)?
+
+    /// The instance when the virtual machine runs with Virtualization, which is the only engine that supports saved sessions.
+    private var virtualizationInstance: VMInstance? { instance as? VMInstance }
+
+    private func createInstance() -> any VMEngineInstance {
+        switch virtualMachineModel.configuration.systemType {
+        case .mac, .linux:
+            return createVirtualizationInstance()
+        case .windows:
+            let newInstance = QEMUInstance(with: virtualMachineModel, library: library, onVMStop: { [weak self] error in
+                self?.handleInstanceStopped(error)
+            })
+            configure(newInstance)
+            return newInstance
+        }
+    }
+
+    private func createVirtualizationInstance() -> VMInstance {
         let newInstance = VMInstance(with: virtualMachineModel, library: library, onVMStop: { [weak self] error in
             self?.handleInstanceStopped(error)
         })
-        
+        configure(newInstance)
+        return newInstance
+    }
+
+    private func configure(_ newInstance: any VMEngineInstance) {
         newInstance.options = options
 
-        guestConnectionObservation = newInstance.$isGuestAppConnected
+        guestConnectionObservation = newInstance.isGuestAppConnectedPublisher
             .removeDuplicates()
             .sink { [weak self] isConnected in
                 self?.isGuestAppConnected = isConnected
             }
-        
-        return newInstance
+    }
+
+    private func runtime(of instance: any VMEngineInstance) throws -> VMRuntime {
+        guard let runtime = instance.currentRuntime?.runtime else {
+            throw Failure("The virtual machine instance is not available.")
+        }
+        return runtime
     }
 
     // MARK: Guest App
@@ -264,7 +289,7 @@ public final class VMController: ObservableObject {
             supportsCloning: bundleSupportsCloning
         )
 
-        guard let instance, state.isRunning || state.isPaused else { return staticEligibility }
+        guard let instance = virtualizationInstance, state.isRunning || state.isPaused else { return staticEligibility }
 
         return staticEligibility.merging(instance.runtimeSaveEligibility)
     }
@@ -296,17 +321,9 @@ public final class VMController: ObservableObject {
 
     /// Sets the state to match what's actually happening to the virtual machine instead of assuming that a failure stopped it.
     private func reconcileState(after error: Error? = nil) {
-        if let vm = try? instance?.virtualMachine {
-            switch vm.state {
-            case .running:
-                state = .running(vm)
-                return
-            case .paused:
-                state = .paused(vm)
-                return
-            default:
-                break
-            }
+        if let current = instance?.currentRuntime {
+            state = current.isPaused ? .paused(current.runtime) : .running(current.runtime)
+            return
         }
 
         virtualMachineModel.reloadSavedSession()
@@ -406,14 +423,12 @@ public final class VMController: ObservableObject {
         state = .starting("Starting virtual machine...")
 
         do {
-            let newInstance = try createInstance()
+            let newInstance = createInstance()
             self.instance = newInstance
 
             try await newInstance.startVM()
 
-            let vm = try newInstance.virtualMachine
-
-            state = .running(vm)
+            state = .running(try runtime(of: newInstance))
 
             /// Update boot date VM metadata with the current date, only if not booting in recovery mode.
             if !newInstance.isRecoveryBoot {
@@ -465,11 +480,11 @@ public final class VMController: ObservableObject {
         let newInstance: VMInstance
 
         do {
-            newInstance = try createInstance()
+            newInstance = createVirtualizationInstance()
             instance = newInstance
 
             try await newInstance.restoreSession(preparation) { [self] vm in
-                state = .restoring(vm, .restoringMemory)
+                state = .restoring(.virtualization(vm), .restoringMemory)
             }
         } catch {
             /// Nothing has executed, so putting the files back keeps the saved session exactly as it was.
@@ -479,7 +494,7 @@ public final class VMController: ObservableObject {
             throw wrapRestoreError(error)
         }
 
-        let vm = try newInstance.virtualMachine
+        let vm = VMRuntime.virtualization(try newInstance.virtualMachine)
 
         state = .restoring(vm, .resuming)
 
@@ -680,9 +695,8 @@ public final class VMController: ObservableObject {
                 let instance = try ensureInstance()
 
                 try await instance.pause()
-                let vm = try instance.virtualMachine
 
-                state = .paused(vm)
+                state = .paused(try runtime(of: instance))
             } catch {
                 reconcileState(after: error)
                 throw error
@@ -701,9 +715,8 @@ public final class VMController: ObservableObject {
                 let instance = try ensureInstance()
 
                 try await instance.resume()
-                let vm = try instance.virtualMachine
 
-                state = .running(vm)
+                state = .running(try runtime(of: instance))
             } catch {
                 reconcileState(after: error)
                 throw error
@@ -811,7 +824,7 @@ public final class VMController: ObservableObject {
 
     @available(macOS 27.0, *)
     public var usbDeviceController: VMUSBDeviceController? {
-        instance?.usbDeviceController
+        virtualizationInstance?.usbDeviceController
     }
 
     public func changeBridgeInterface(to interfaceIdentifier: String) throws {
@@ -854,8 +867,11 @@ public final class VMController: ObservableObject {
             throw SavedSessionError.operationInProgress
         }
 
-        let instance = try ensureInstance()
-        let vm = try instance.virtualMachine
+        guard let instance = virtualizationInstance else {
+            throw SavedSessionError.notEligible(.unsupportedGuest)
+        }
+        instance.options = options
+        let vm = VMRuntime.virtualization(try instance.virtualMachine)
 
         /// Eligibility includes what's known about the running configuration, which is only checked while the virtual machine is running or paused.
         if let issue = saveEligibility.primaryIssue {
@@ -943,7 +959,7 @@ public final class VMController: ObservableObject {
         try await lease.perform {
             guard case .recoveryRequired(.stopFailedAfterSave) = state else { return }
 
-            let instance = try ensureInstance()
+            guard let instance = virtualizationInstance else { throw CocoaError(.validationMissingMandatoryProperty) }
             try await instance.tearDownAfterSave()
 
             self.instance = nil
@@ -972,10 +988,10 @@ public final class VMController: ObservableObject {
         virtualMachineModel.reloadSavedSession()
         library.reload(animated: false)
 
-        if let instance, let vm = try? instance.virtualMachine, vm.state == .paused {
+        if let instance = virtualizationInstance, let vm = try? instance.virtualMachine, vm.state == .paused {
             /// The virtual machine was saved but couldn't be stopped. It's usable again now that the session is gone.
             await instance.restartGuestCommunication()
-            state = .paused(vm)
+            state = .paused(.virtualization(vm))
         } else {
             state = restingState
         }
@@ -995,7 +1011,7 @@ public final class VMController: ObservableObject {
         }
     }
 
-    private func ensureInstance() throws -> VMInstance {
+    private func ensureInstance() throws -> any VMEngineInstance {
         guard let instance = instance else {
             throw CocoaError(.validationMissingMandatoryProperty)
         }

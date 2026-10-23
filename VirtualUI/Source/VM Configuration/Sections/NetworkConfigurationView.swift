@@ -125,6 +125,9 @@ struct NetworkDevicePicker: View {
     @Binding var hardware: VBMacDevice
     var bridgedNetworkingDisabled: Bool
 
+    @Environment(\.configurationGuestType)
+    private var guestType
+
     @State private var selectedOption: VBNetworkDeviceInterface?
 
     @State private var interfaces: [VBNetworkDeviceInterface] = [.automatic]
@@ -137,11 +140,13 @@ struct NetworkDevicePicker: View {
 
                     Text("NAT").tag(NetworkDeviceSelection.NAT)
 
-                    Section("Bridge") {
-                        ForEach(interfaces) { interface in
-                            Text(interface.name)
-                                .tag(NetworkDeviceSelection.bridge(interface.id))
-                                .disabled(bridgedNetworkingDisabled)
+                    if guestType.supportsBridgedNetworking {
+                        Section("Bridge") {
+                            ForEach(interfaces) { interface in
+                                Text(interface.name)
+                                    .tag(NetworkDeviceSelection.bridge(interface.id))
+                                    .disabled(bridgedNetworkingDisabled)
+                            }
                         }
                     }
                 }
@@ -149,13 +154,15 @@ struct NetworkDevicePicker: View {
 
                 Spacer()
 
-                Button {
-                    refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
+                if guestType.supportsBridgedNetworking {
+                    Button {
+                        refresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reload interfaces")
                 }
-                .buttonStyle(.plain)
-                .help("Reload interfaces")
             }
             .task { refresh() }
         }
