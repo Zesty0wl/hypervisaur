@@ -10,7 +10,7 @@ import OSLog
 @_exported import BuddyFoundation
 
 struct VirtualCoreConstants {
-    static let subsystemName = "codes.rambo.VirtualCore"
+    static let subsystemName = "com.neiljohn.hypervisaur.VirtualCore"
 }
 
 private final class _VirtualCoreStub { }

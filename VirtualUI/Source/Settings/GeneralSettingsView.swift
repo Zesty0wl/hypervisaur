@@ -11,7 +11,8 @@ import BuddyUI
 
 struct GeneralSettingsView: View {
     @Binding var settings: VBSettings
-    @Binding var enableAutomaticUpdates: Bool
+    /// `nil` when the app can't update itself, which hides the update settings.
+    var enableAutomaticUpdates: Binding<Bool>?
     @Binding var alert: AlertContent
 
     @State private var libraryPathText = ""
@@ -27,7 +28,7 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Storage")
             } footer: {
-                Text("VirtualBuddy saves your virtual machines and downloaded installer images here.")
+                Text("Hypervisaur saves your virtual machines and downloaded installer images here.")
                     .settingsFooterStyle()
             }
 
@@ -45,12 +46,14 @@ struct GeneralSettingsView: View {
                     .settingsFooterStyle()
             }
 
-            Section {
-                Toggle("Automatically check for updates", isOn: $enableAutomaticUpdates)
+            if let enableAutomaticUpdates {
+                Section {
+                    Toggle("Automatically check for updates", isOn: enableAutomaticUpdates)
 
-                betaSection
-            } header: {
-                Text("App Updates")
+                    betaSection
+                } header: {
+                    Text("App Updates")
+                }
             }
         }
         .navigationTitle(Text("General"))
@@ -152,7 +155,7 @@ extension URL {
             try FileManager.default.removeItem(at: testFileURL)
             return nil
         } catch {
-            return "VirtualBuddy is unable to write files to the directory \(lastPathComponent). Please check the permissions for that directory or choose a different one."
+            return "Hypervisaur is unable to write files to the directory \(lastPathComponent). Please check the permissions for that directory or choose a different one."
         }
     }
 }

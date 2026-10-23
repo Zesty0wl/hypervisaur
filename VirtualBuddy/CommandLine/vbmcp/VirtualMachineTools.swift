@@ -11,9 +11,9 @@ enum VirtualMachineTools {
     }
 
     static let instructions = """
-    Creates and runs Windows 11 virtual machines in VirtualBuddy on this Mac. create_windows_vm installs Windows without \
+    Creates and runs Windows 11 virtual machines in Hypervisaur on this Mac. create_windows_vm installs Windows without \
     any interaction and signs in to a local account, which takes about 10 minutes; call wait_for_windows_vm afterwards \
-    to wait until the desktop is ready. The first time VirtualBuddy is asked to start a virtual machine, it asks the user \
+    to wait until the desktop is ready. The first time Hypervisaur is asked to start a virtual machine, it asks the user \
     to allow it.
     """
 
@@ -22,7 +22,7 @@ enum VirtualMachineTools {
     private static let listVirtualMachines = MCPTool(
         name: "list_virtual_machines",
         title: "List Virtual Machines",
-        description: "Lists the virtual machines in the VirtualBuddy library, with the status of Windows virtual machines.",
+        description: "Lists the virtual machines in the Hypervisaur library, with the status of Windows virtual machines.",
         inputSchema: ["type": "object", "properties": [:]],
         run: { _, _ in
             let machines = try Library.machines()
@@ -81,7 +81,7 @@ enum VirtualMachineTools {
         inputSchema: schema([
             "username": property("string", "The name of the local Windows account to create and sign in to, such as \"neiljohn\". Up to 20 characters."),
             "password": property("string", "The account's password. Without one, the account has no password and Windows signs in to it every time it starts."),
-            "name": property("string", "The name of the virtual machine in VirtualBuddy. Defaults to \"Windows 11\", numbered if that's taken."),
+            "name": property("string", "The name of the virtual machine in Hypervisaur. Defaults to \"Windows 11\", numbered if that's taken."),
             "disk_size_gb": property("integer", "The size of the virtual machine's disk in gigabytes. At least 64; defaults to 80. The disk only uses as much space as it contains."),
             "memory_gb": property("integer", "The memory for the virtual machine in gigabytes. At least 4; defaults to \(VBMacDevice.defaultWindows.memorySize / .storageGigabyte)."),
             "cpu_count": property("integer", "The number of processor cores. Defaults to \(VBMacDevice.defaultWindows.cpuCount)."),
@@ -111,7 +111,7 @@ enum VirtualMachineTools {
     private static let startVM = MCPTool(
         name: "start_vm",
         title: "Start Virtual Machine",
-        description: "Starts a virtual machine in VirtualBuddy, opening its window.",
+        description: "Starts a virtual machine in Hypervisaur, opening its window.",
         inputSchema: schema(["name": property("string", "The name of the virtual machine.")], required: ["name"]),
         run: { arguments, progress in
             let model = try Library.machine(named: try arguments.requiredString("name"))
@@ -185,20 +185,20 @@ enum VirtualMachineTools {
         try await App.open("boot", name: model.name)
 
         guard model.configuration.systemType == .windows else {
-            return "Asked VirtualBuddy to start \(model.name)."
+            return "Asked Hypervisaur to start \(model.name)."
         }
 
-        await progress("Waiting for VirtualBuddy to start \(model.name)", nil)
+        await progress("Waiting for Hypervisaur to start \(model.name)", nil)
 
         let deadline = ContinuousClock.now + startTimeout
         while ContinuousClock.now < deadline {
             try await Task.sleep(for: .seconds(1))
             if WindowsGuestStatus(for: model) != .stopped {
-                return "Started \(model.name) in VirtualBuddy."
+                return "Started \(model.name) in Hypervisaur."
             }
         }
 
-        throw Failure("VirtualBuddy hasn’t started \(model.name). If VirtualBuddy is asking whether to allow it to be controlled, allow it, then call start_vm again.")
+        throw Failure("Hypervisaur hasn’t started \(model.name). If Hypervisaur is asking whether to allow it to be controlled, allow it, then call start_vm again.")
     }
 
     private static let stoppedGracePeriod = Duration.seconds(30)
@@ -400,7 +400,7 @@ private enum App {
     @MainActor
     static func open(_ action: String, name: String) async throws {
         var components = URLComponents()
-        components.scheme = "virtualbuddy"
+        components.scheme = "hypervisaur"
         components.host = action
         components.queryItems = [URLQueryItem(name: "name", value: name)]
 

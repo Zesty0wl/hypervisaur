@@ -30,7 +30,7 @@ func makeProfile(domain: String) throws -> Data {
         "PayloadVersion": 1,
         "PayloadIdentifier": "\(identifier).preferences",
         "PayloadUUID": UUID().uuidString,
-        "PayloadDisplayName": "VirtualBuddy Feature Restrictions",
+        "PayloadDisplayName": "Hypervisaur Feature Restrictions",
         "PayloadContent": [domain: ["Forced": [["mcx_preference_settings": restrictions]]]]
     ]
     let profile: [String: Any] = [
@@ -38,7 +38,7 @@ func makeProfile(domain: String) throws -> Data {
         "PayloadVersion": 1,
         "PayloadIdentifier": identifier,
         "PayloadUUID": UUID().uuidString,
-        "PayloadDisplayName": "VirtualBuddy — Restrict All Managed Features (Testing)",
+        "PayloadDisplayName": "Hypervisaur — Restrict All Managed Features (Testing)",
         "PayloadDescription": "Disables shared folders, guest app mounting, USB passthrough, bridged networking, and microphone input. Shut down and start VMs after installing or removing this test profile. Already installed guest apps are unaffected.",
         "PayloadScope": "System",
         "PayloadRemovalDisallowed": false,
@@ -123,7 +123,7 @@ func run() throws {
         print("Signs with the first valid identity in the local keychain search list. Does not install the profile or overwrite an existing file.")
         return
     }
-    var domain = "codes.rambo.VirtualBuddy"
+    var domain = "com.neiljohn.hypervisaur"
     if arguments.first == "--domain" {
         guard arguments.count >= 2, !arguments[1].isEmpty, !arguments[1].hasPrefix("-") else {
             throw ProfileError(message: "--domain requires a preference domain.")
@@ -134,7 +134,7 @@ func run() throws {
     guard arguments.count <= 1, arguments.first?.hasPrefix("-") != true else {
         throw ProfileError(message: "Invalid arguments. Use --help for usage.")
     }
-    let output = URL(fileURLWithPath: arguments.first ?? "VirtualBuddy-Restricted.mobileconfig")
+    let output = URL(fileURLWithPath: arguments.first ?? "Hypervisaur-Restricted.mobileconfig")
     guard !FileManager.default.fileExists(atPath: output.path) else {
         throw ProfileError(message: "Output already exists: \(output.path)")
     }

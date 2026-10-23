@@ -256,7 +256,7 @@ public struct VirtualMachineSessionView: View {
     private func startupErrorMessage(for error: Error) -> String {
         if error.isMaximumActiveVirtualMachinesError {
             return """
-            VirtualBuddy can't start this virtual machine because macOS has reached the system limit for active virtual machines. \
+            Hypervisaur can't start this virtual machine because macOS has reached the system limit for active virtual machines. \
             This is a system limitation. Shut down another virtual machine before starting this one.
             """
         }

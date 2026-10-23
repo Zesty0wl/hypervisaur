@@ -154,7 +154,7 @@ public struct LibraryView: View {
             "Library Not Mounted",
             systemImage: "externaldrive.badge.questionmark",
             description: Text("""
-            The volume containing your VirtualBuddy library is not currently mounted.
+            The volume containing your Hypervisaur library is not currently mounted.
             Once mounted, your virtual machines will appear here.
             """)
         ) {
@@ -175,7 +175,7 @@ public struct LibraryView: View {
             "Library Missing",
             systemImage: "questionmark.folder",
             description: Text("""
-            VirtualBuddy is unable to locate your library directory.
+            Hypervisaur is unable to locate your library directory.
 
             Review your settings to ensure the directory is set correctly. If it exists, there may be a permission problem.
 

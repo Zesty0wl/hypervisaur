@@ -1,111 +1,74 @@
 import SwiftUI
-import BuddyPlatform
 import BuddyUI
 
+/// Introduces the app over the library's background when the library is empty for the first time:
+/// the app icon arrives, followed by the app's name and the button to create a virtual machine.
 struct FirstLaunchExperienceView: View {
     var action: () -> ()
 
+    @State private var iconRevealed = false
+    @State private var titleRevealed = false
     @State private var buttonRevealed = false
 
     var body: some View {
-        ZStack {
-            AnimationView()
-                .ignoresSafeArea()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 28) {
+            Spacer()
 
-            VStack {
-                Spacer()
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 180, height: 180)
+                .shadow(color: .black.opacity(0.35), radius: 24, x: 0, y: 12)
+                .scaleEffect(iconRevealed ? 1 : 0.4)
+                .rotationEffect(.degrees(iconRevealed ? 0 : -12))
+                .opacity(iconRevealed ? 1 : 0)
 
-                if buttonRevealed {
-                    Button {
-                        action()
-                    } label: {
-                        Text("Create Virtual Machine")
-                            .font(.system(.title2, design: .rounded, weight: .medium))
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(FirstLaunchButtonStyle())
-                    .controlSize(.large)
-                    .transition(.scale(scale: 1.5).combined(with: .opacity))
-                }
+            Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "")
+                .font(.system(size: 44, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 2)
+                .opacity(titleRevealed ? 1 : 0)
+                .offset(y: titleRevealed ? 0 : 12)
 
-                Spacer()
+            Button {
+                action()
+            } label: {
+                Text("Create Virtual Machine")
+                    .font(.system(.title2, design: .rounded, weight: .medium))
             }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(FirstLaunchButtonStyle())
+            .controlSize(.large)
+            .opacity(buttonRevealed ? 1 : 0)
+            .scaleEffect(buttonRevealed ? 1 : 1.2)
+            .disabled(!buttonRevealed)
+
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            withAnimation(.snappy.delay(7.5)) {
+            withAnimation(.spring(response: 0.7, dampingFraction: 0.55).delay(0.3)) {
+                iconRevealed = true
+            }
+            withAnimation(.snappy.delay(1.1)) {
+                titleRevealed = true
+            }
+            withAnimation(.snappy.delay(1.8)) {
                 buttonRevealed = true
             }
         }
     }
+}
 
-    private struct AnimationView: NSViewRepresentable {
-        typealias NSViewType = FirstLaunchExperienceNSView
-
-        func makeNSView(context: Context) -> FirstLaunchExperienceNSView {
-            FirstLaunchExperienceNSView(frame: .zero)
+private extension Color {
+    /// The app's brand colour, which the introduction uses whatever accent colour the user has chosen for controls.
+    static let hypervisaurTeal = Color(nsColor: NSColor(name: nil) { appearance in
+        if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+            NSColor(srgbRed: 0x2E / 255, green: 0xC4 / 255, blue: 0xB6 / 255, alpha: 1)
+        } else {
+            NSColor(srgbRed: 0x0E / 255, green: 0x7C / 255, blue: 0x73 / 255, alpha: 1)
         }
-
-        func updateNSView(_ nsView: FirstLaunchExperienceNSView, context: Context) {
-
-        }
-
-        final class FirstLaunchExperienceNSView: NSView {
-            override init(frame frameRect: NSRect) {
-                super.init(frame: frameRect)
-
-                setup()
-            }
-
-            required init?(coder: NSCoder) {
-                fatalError()
-            }
-
-            private lazy var assetLayer = CALayer.load(assetNamed: "FirstLaunchExperience", bundle: .virtualUI) ?? CALayer()
-
-            #if DEBUG
-            private var debugSkipAnimation: Bool { false }
-            #endif
-
-            private func setup() {
-                platformLayer.addSublayer(assetLayer)
-                assetLayer.isGeometryFlipped = false
-
-                assetLayer.beginTime = CACurrentMediaTime()
-                assetLayer.speed = 1
-
-                #if DEBUG
-                if debugSkipAnimation {
-                    assetLayer.timeOffset = 10
-                }
-                #endif
-            }
-
-            override var isFlipped: Bool { true }
-
-            override func layout() {
-                super.layout()
-
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                defer { CATransaction.commit() }
-
-                assetLayer.frame = bounds
-                assetLayer.sublayer(named: "background")?.frame = bounds
-                assetLayer.sublayer(path: "background.fullBleed")?.frame = bounds
-                assetLayer.sublayer(path: "background.brighten")?.frame = bounds
-                assetLayer.sublayer(named: "backdrop")?.frame = bounds
-                assetLayer.sublayer(named: "iconTransform")?.position = CGPoint(x: bounds.midX, y: bounds.midY)
-                assetLayer.sublayer(named: "spotlightBleed")?.frame = bounds
-                assetLayer.sublayer(named: "scanlines")?.frame.size.width = bounds.width
-                if let backdropMask = assetLayer.sublayer(named: "backdrop")?.mask {
-                    backdropMask.bounds.size = bounds.size
-                    backdropMask.position = CGPoint(x: bounds.midX, y: bounds.maxY)
-                }
-            }
-        }
-
-    }
+    })
 }
 
 private struct FirstLaunchButtonStyle: ButtonStyle {
@@ -117,18 +80,18 @@ private struct FirstLaunchButtonStyle: ButtonStyle {
             .background(Material.regular, in: shape)
             .overlay {
                 ZStack {
-                    Color.accentColor
+                    Color.hypervisaurTeal
                         .blendMode(.color)
                         .opacity(configuration.isPressed ? 1 : 0.7)
 
                     shape
                         .inset(by: 10)
-                        .fill(Color.accentColor)
+                        .fill(Color.hypervisaurTeal)
                         .blur(radius: 10)
                         .blendMode(.plusLighter)
                         .opacity(configuration.isPressed ? 0.1 : 0)
 
-                    LinearGradient(colors: [.accentColor.opacity(0.9), .accentColor.opacity(0.4)], startPoint: .top, endPoint: .bottom)
+                    LinearGradient(colors: [.hypervisaurTeal.opacity(0.9), .hypervisaurTeal.opacity(0.4)], startPoint: .top, endPoint: .bottom)
                         .mask {
                             shape.strokeBorder(Color.white, lineWidth: 1)
                         }

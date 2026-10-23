@@ -205,7 +205,7 @@ public final class LogStreamer: ObservableObject {
 
 #if DEBUG
 public extension LogStreamer {
-    static let previewSubsystemName = "codes.rambo.LogStreamer.PreviewSubsystem"
+    static let previewSubsystemName = "com.neiljohn.hypervisaur.LogStreamer.PreviewSubsystem"
     static let previewLogger = Logger(subsystem: previewSubsystemName, category: previewSubsystemName)
     static var preview: LogStreamer {
         DispatchQueue.main.async {

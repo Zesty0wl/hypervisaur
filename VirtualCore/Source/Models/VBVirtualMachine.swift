@@ -107,7 +107,7 @@ public struct VBVirtualMachine: Identifiable, VBStorageDeviceContainer {
 }
 
 /// Use ``VBVirtualMachine/bundleExtension`` to access at runtime.
-private let kVBVirtualMachineBundleExtension = "vbvm"
+private let kVBVirtualMachineBundleExtension = "hypervisaur"
 
 public extension VBVirtualMachine {
     static let bundleExtension: String = {
@@ -171,7 +171,7 @@ extension VBVirtualMachine {
 }
 
 public extension UTType {
-    static let virtualBuddyVM = UTType(exportedAs: "codes.rambo.VirtualBuddy.VM", conformingTo: .bundle)
+    static let virtualBuddyVM = UTType(exportedAs: "com.neiljohn.hypervisaur.vm", conformingTo: .bundle)
 }
 
 public extension VBVirtualMachine {

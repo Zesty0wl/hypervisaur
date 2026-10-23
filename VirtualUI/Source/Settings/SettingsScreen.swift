@@ -37,11 +37,12 @@ public struct SettingsScreen: View {
     #endif
 
     @EnvironmentObject private var container: VBSettingsContainer
-    @Binding private var enableAutomaticUpdates: Bool
+    /// `nil` when the app can't update itself, which hides the update settings.
+    private var enableAutomaticUpdates: Binding<Bool>?
     private var deepLinkSentinel: () -> DeepLinkSentinel
 
-    public init(previewTab: SettingsTab? = nil, enableAutomaticUpdates: Binding<Bool>, deepLinkSentinel: @escaping @autoclosure () -> DeepLinkSentinel) {
-        self._enableAutomaticUpdates = enableAutomaticUpdates
+    public init(previewTab: SettingsTab? = nil, enableAutomaticUpdates: Binding<Bool>?, deepLinkSentinel: @escaping @autoclosure () -> DeepLinkSentinel) {
+        self.enableAutomaticUpdates = enableAutomaticUpdates
         self.deepLinkSentinel = deepLinkSentinel
 
         #if DEBUG
@@ -79,7 +80,7 @@ public struct SettingsScreen: View {
             case .general:
                 GeneralSettingsView(
                     settings: $container.settings,
-                    enableAutomaticUpdates: $enableAutomaticUpdates,
+                    enableAutomaticUpdates: enableAutomaticUpdates,
                     alert: $alert
                 )
             case .virtualization:

@@ -32,7 +32,7 @@ public extension VBStorageDeviceContainer {
             let device = try bootDevice
 
             guard case .managedImage(let image) = device.backing else {
-                throw Failure("The boot device must use a disk image managed by VirtualBuddy")
+                throw Failure("The boot device must use a disk image managed by Hypervisaur")
             }
 
             return image

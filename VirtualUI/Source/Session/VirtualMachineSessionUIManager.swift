@@ -136,11 +136,17 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
     }
 
     public func launchImportVirtualMachinePanel(library: VMLibraryController) {
-        guard let url = NSOpenPanel.run(accepting: VMImporterRegistry.default.supportedFileTypes, directoryURL: nil, defaultDirectoryKey: "importVirtualMachine", prompt: "Import") else {
+        guard let url = NSOpenPanel.run(accepting: VMImporterRegistry.default.supportedFileTypes, directoryURL: Self.virtualBuddyLibraryURL, defaultDirectoryKey: "importVirtualMachine", prompt: "Import") else {
             return
         }
 
         open(fileURL: url, library: library)
+    }
+
+    /// VirtualBuddy's own library, if it uses the default location, which is where most imports come from.
+    private static var virtualBuddyLibraryURL: URL? {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "VirtualBuddy", directoryHint: .isDirectory)
+        return url.isReadableDirectory ? url : nil
     }
 
     private func importVirtualMachine(from path: FilePath, using importer: any VMImporter, library: VMLibraryController) async {
@@ -183,7 +189,7 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
         return await NSAlert
             .runConfirmationAlert(
                 title: "Import From \(importer.appName)?",
-                message: "VirtualBuddy will attempt to import your virtual machine from \(importer.appName). All data from this virtual machine in \(importer.appName) will be copied into your VirtualBuddy library. Would you like to proceed?",
+                message: "Hypervisaur will attempt to import your virtual machine from \(importer.appName). All data from this virtual machine in \(importer.appName) will be copied into your Hypervisaur library. Would you like to proceed?",
                 continueButtonTitle: "Import",
                 cancelButtonTitle: "Cancel",
                 continueButtonIsDefault: true

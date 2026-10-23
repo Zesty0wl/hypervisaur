@@ -103,7 +103,7 @@ private final class TerminationProgressPanel {
             backing: .buffered,
             defer: false
         )
-        panel.title = "Quitting VirtualBuddy"
+        panel.title = "Quitting Hypervisaur"
         panel.isFloatingPanel = true
         panel.isReleasedWhenClosed = false
         panel.contentViewController = NSHostingController(rootView: view)

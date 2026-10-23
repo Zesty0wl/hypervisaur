@@ -53,7 +53,7 @@ enum HostDiskImage {
             try await HostCommand.run("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-noautoopen", "-noverify", "-mountpoint", mountPoint.path, imageURL.path])
         } catch {
             try? FileManager.default.removeItem(at: mountPoint)
-            throw Failure("VirtualBuddy couldn’t open “\(imageURL.lastPathComponent)” as a disc image. \(error.localizedDescription)")
+            throw Failure("Hypervisaur couldn’t open “\(imageURL.lastPathComponent)” as a disc image. \(error.localizedDescription)")
         }
 
         return mountPoint
@@ -101,7 +101,7 @@ enum HostDiskImage {
               let entities = plist["system-entities"] as? [[String: Any]],
               let device = entities.compactMap({ $0["dev-entry"] as? String }).min(by: { $0.count < $1.count })
         else {
-            throw Failure("VirtualBuddy couldn’t attach the disk image \(imageURL.lastPathComponent).")
+            throw Failure("Hypervisaur couldn’t attach the disk image \(imageURL.lastPathComponent).")
         }
 
         return device

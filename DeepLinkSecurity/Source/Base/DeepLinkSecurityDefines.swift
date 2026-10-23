@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 struct DeepLinkSecurityDefines {
-    static let subsystem = "codes.rambo.DeepLinkSecurity"
+    static let subsystem = "com.neiljohn.hypervisaur.DeepLinkSecurity"
 }
 
 struct DeepLinkError: LocalizedError {

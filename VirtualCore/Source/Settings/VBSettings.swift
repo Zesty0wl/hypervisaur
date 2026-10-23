@@ -187,7 +187,7 @@ public extension URL {
             return baseURL
                 .appendingPathComponent("VirtualBuddy")
         } catch {
-            fatalError("VirtualBuddy is unable to write to your user's documents directory, this is bad!")
+            fatalError("Hypervisaur is unable to write to your user's documents directory, this is bad!")
         }
     }()
 
@@ -200,13 +200,13 @@ public extension URL {
                 create: true
             )
 
-            let url = baseURL.appendingPathComponent("VirtualBuddy")
+            let url = baseURL.appendingPathComponent("Hypervisaur")
 
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
 
             return url
         } catch {
-            fatalError("VirtualBuddy is unable to write to your user's Library/Application Support directory, this is bad!")
+            fatalError("Hypervisaur is unable to write to your user's Library/Application Support directory, this is bad!")
         }
     }()
 }

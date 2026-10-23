@@ -21,7 +21,7 @@ struct ManagedRestrictionBannerView: View {
         .alert("Managed Preferences", isPresented: $isShowingHelp) {
             Button("OK") { isShowingHelp = false }
         } message: {
-            Text("A configuration profile applied by your organization is blocking this feature in VirtualBuddy. For more information, please contact your system administrator or IT department.")
+            Text("A configuration profile applied by your organization is blocking this feature in Hypervisaur. For more information, please contact your system administrator or IT department.")
         }
     }
 }

@@ -39,8 +39,8 @@ ASSETCATALOG_COMPILER_APPICON_NAME[config=Dev_Release][sdk=*][arch=*] = AppIcon-
 ASSETCATALOG_COMPILER_APPICON_NAME[config=Beta_Debug][sdk=*][arch=*] = AppIcon-zBeta
 ASSETCATALOG_COMPILER_APPICON_NAME[config=Beta_Release][sdk=*][arch=*] = AppIcon-zBeta
 
-PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_NAME = Hypervisaur
 
-// Development releases named VirtualBuddy-Dev.app
-PRODUCT_NAME[config=Dev_Release][sdk=*][arch=*] = $(TARGET_NAME)-Dev
+// Development releases named Hypervisaur-Dev.app
+PRODUCT_NAME[config=Dev_Release][sdk=*][arch=*] = Hypervisaur-Dev
 

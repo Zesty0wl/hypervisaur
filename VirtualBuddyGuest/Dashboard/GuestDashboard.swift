@@ -54,7 +54,7 @@ struct GuestDashboard: View {
                 .frame(width: 6)
 
             if hostConnection.isConnected {
-                Text("Connected to VirtualBuddy")
+                Text("Connected to Hypervisaur")
             } else {
                 Text("Not Connected")
             }

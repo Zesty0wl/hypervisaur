@@ -4,7 +4,7 @@ import Combine
 
 #if DEBUG
 public final class SimulatedRestoreBackend: NSObject, RestoreBackend, @unchecked Sendable {
-    public var consolePredicate: LogStreamer.Predicate { .process("VirtualBuddy") }
+    public var consolePredicate: LogStreamer.Predicate { .process("Hypervisaur") }
     
     public init(model: VBVirtualMachine, restoringFromImageAt restoreImageFileURL: URL) {
         super.init()

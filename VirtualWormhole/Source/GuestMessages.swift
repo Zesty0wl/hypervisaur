@@ -81,7 +81,7 @@ enum GuestSessionError: LocalizedError {
     case disconnected, invalidReply, unavailableDomain, remote(String)
     var errorDescription: String? {
         switch self {
-        case .disconnected: "The connection to VirtualBuddy ended."
+        case .disconnected: "The connection to Hypervisaur ended."
         case .invalidReply: "The host returned an invalid response."
         case .unavailableDomain: "This defaults domain is not available for import."
         case .remote(let message): message

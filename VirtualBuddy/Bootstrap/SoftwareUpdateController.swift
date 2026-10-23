@@ -33,12 +33,17 @@ final class SoftwareUpdateController: NSObject, ObservableObject {
         }
     }
 
-    var automaticUpdatesBinding: Binding<Bool> {
+    /// `nil` when the app is built without Sparkle, which hides the update settings.
+    var automaticUpdatesBinding: Binding<Bool>? {
+        #if ENABLE_SPARKLE
         Binding { [self] in
             automaticUpdatesEnabled
         } set: { [self] newValue in
             automaticUpdatesEnabled = newValue
         }
+        #else
+        nil
+        #endif
     }
 
     #if ENABLE_SPARKLE

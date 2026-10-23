@@ -2,7 +2,7 @@
 
 LIBRARY_PATH="${HOME}/Library/Application Support/VirtualBuddy"
 
-CUSTOM_PATH=$(defaults read codes.rambo.VirtualBuddy libraryPath || true)
+CUSTOM_PATH=$(defaults read com.neiljohn.hypervisaur libraryPath || true)
 
 if [ ! -z "${CUSTOM_PATH}" ]; then
     LIBRARY_PATH="${CUSTOM_PATH}"

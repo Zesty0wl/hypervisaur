@@ -130,6 +130,6 @@ enum GuestPayloadIO {
         try data.write(to: url, options: .atomic)
     }
     static func temporaryURL() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("VirtualBuddy-\(UUID().uuidString).plist")
+        FileManager.default.temporaryDirectory.appendingPathComponent("Hypervisaur-\(UUID().uuidString).plist")
     }
 }

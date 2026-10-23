@@ -134,15 +134,15 @@ struct WindowsInstallDiskTests {
     @Test func setupScriptInstallsDriversAndSignInTask() {
         let script = WindowsDriversDisk.setupScript
         #expect(script.contains("pnputil /add-driver \"%~dp0*.inf\" /subdirs /install"))
-        #expect(script.contains("schtasks /create /f /tn \"VirtualBuddy\\Started\" /sc onstart /ru SYSTEM /tr \"%StatusScript% startup\""))
-        #expect(script.contains("schtasks /create /f /tn \"VirtualBuddy\\Signed In\" /sc onlogon /ru SYSTEM /tr \"%StatusScript%\""))
+        #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Started\" /sc onstart /ru SYSTEM /tr \"%StatusScript% startup\""))
+        #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Signed In\" /sc onlogon /ru SYSTEM /tr \"%StatusScript%\""))
         #expect(!script.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
     }
 
     @Test func statusScriptReportsStartupAndSignInAfterSetup() {
         let script = WindowsDriversDisk.statusScript
-        #expect(script.contains("echo started>\\\\.\\Global\\virtualbuddy.status"))
-        #expect(script.contains("echo signed-in>\\\\.\\Global\\virtualbuddy.status"))
+        #expect(script.contains("echo started>\\\\.\\Global\\hypervisaur.status"))
+        #expect(script.contains("echo signed-in>\\\\.\\Global\\hypervisaur.status"))
         #expect(script.contains("IMAGE_STATE_COMPLETE"))
         #expect(script.contains("find /i /v \"defaultuser\""))
         #expect(!script.replacingOccurrences(of: "\r\n", with: "").contains("\n"))

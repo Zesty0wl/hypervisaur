@@ -23,9 +23,9 @@ public extension Int {
 }
 
 public extension BlurHashToken {
-    /// Hardcoded VirtualBuddy orange background blur hash.
+    /// Hardcoded Hypervisaur teal to navy background blur hash.
     static let virtualBuddyBackground = BlurHashToken(
-        value: "U4H09BEfIY$%U7ocVcM$8%R*M}f~zwIXcArd",
+        value: "UJ2vTLlmkVkWl-kqj[fkkWj[fQfQkWfkfPfR",
         size: 4
     )
 

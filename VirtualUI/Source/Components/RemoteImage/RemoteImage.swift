@@ -41,7 +41,7 @@ struct RemoteImage: View {
 }
 
 final class RemoteImageLoader {
-    private let logger = Logger(subsystem: "codes.rambo.RemoteImageLoader", category: "RemoteImageLoader")
+    private let logger = Logger(subsystem: VirtualUIConstants.subsystemName, category: "RemoteImageLoader")
 
     private let memoryCache = NSCache<NSString, NSImage>()
 

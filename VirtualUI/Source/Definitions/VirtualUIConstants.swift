@@ -10,7 +10,7 @@ import OSLog
 @_exported import VirtualCore
 
 struct VirtualUIConstants {
-    static let subsystemName = "codes.rambo.VirtualUI"
+    static let subsystemName = "com.neiljohn.hypervisaur.VirtualUI"
 }
 
 @available(swift, obsoleted: 1.0, message: "Provided for Objective-C compatibility, don't use in Swift code.")

@@ -601,7 +601,7 @@ public extension VMLibraryController {
     ///
     /// The assertion has no handler of its own: what happens to running virtual machines when the app quits
     /// is decided in one place, by the app's termination sequence, which saves or shuts them down.
-    nonisolated static let runningMachinesAssertionID = "codes.rambo.VirtualBuddy.runningMachines"
+    nonisolated static let runningMachinesAssertionID = "com.neiljohn.hypervisaur.runningMachines"
 }
 
 private extension VMLibraryController {

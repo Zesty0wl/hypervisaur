@@ -53,5 +53,5 @@ private extension Bundle {
 
      The `Bundle.executableURL` property will return the URL of the actual executable symlink instead of the one declared.
      */
-    var executableName: String { infoDictionary?["CFBundleExecutable"] as? String ?? "VirtualBuddy" }
+    var executableName: String { infoDictionary?["CFBundleExecutable"] as? String ?? "Hypervisaur" }
 }

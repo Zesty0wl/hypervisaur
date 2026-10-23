@@ -29,21 +29,24 @@ struct VirtualizationSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Toggle("Enable Apple Signing Status Check", isOn: $settings.enableTSSCheck)
-            } header: {
-                Text("Signing Check")
-            } footer: {
-                SettingsFooter {
-                    Text("Whether VirtualBuddy should verify macOS build signatures before downloading.")
-                } helpText: {
-                    Text("""
-                    With this enabled, VirtualBuddy will check if the selected macOS build is being signed by Apple \
-                    before attempting to download it.
-                    
-                    Unsigned builds can not be installed in virtual machines, so this saves time and bandwidth, \
-                    allowing you to choose another version before waiting for the entire download and install attempt.
-                    """)
+            /// The check is made by VirtualBuddy's servers, which aren't used.
+            if VBAPIClient.isRemoteServiceEnabled {
+                Section {
+                    Toggle("Enable Apple Signing Status Check", isOn: $settings.enableTSSCheck)
+                } header: {
+                    Text("Signing Check")
+                } footer: {
+                    SettingsFooter {
+                        Text("Whether Hypervisaur should verify macOS build signatures before downloading.")
+                    } helpText: {
+                        Text("""
+                        With this enabled, Hypervisaur will check if the selected macOS build is being signed by Apple \
+                        before attempting to download it.
+                        
+                        Unsigned builds can not be installed in virtual machines, so this saves time and bandwidth, \
+                        allowing you to choose another version before waiting for the entire download and install attempt.
+                        """)
+                    }
                 }
             }
 

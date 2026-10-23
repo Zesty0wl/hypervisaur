@@ -57,6 +57,10 @@ public final class VBAPIClient {
 
     public let environment: Environment
 
+    /// Hypervisaur doesn't use VirtualBuddy's servers. The software catalog is the one built into the app,
+    /// and macOS builds aren't checked for Apple's signature before they're downloaded.
+    public static let isRemoteServiceEnabled = false
+
     public init(environment: Environment = .current) {
         self.environment = environment
     }
@@ -104,6 +108,10 @@ public final class VBAPIClient {
             return try Self.fetchBuiltInCatalog(for: guest)
         }
         #endif
+
+        guard Self.isRemoteServiceEnabled else {
+            return try Self.fetchBuiltInCatalog(for: guest)
+        }
 
         do {
             let remoteCatalog = try await fetchRemoteCatalog(for: guest, skipCache: skipCache)

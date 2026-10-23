@@ -118,7 +118,7 @@ struct USBDevicesConfigurationView: View {
             }
 
             Text("""
-            When the virtual machine is running, use the Accessory Access menu in the menu bar to grant VirtualBuddy access to a device.
+            When the virtual machine is running, use the Accessory Access menu in the menu bar to grant Hypervisaur access to a device.
             
             Devices that have isochronous endpoints (such as iPhones) are not supported. 
             """)

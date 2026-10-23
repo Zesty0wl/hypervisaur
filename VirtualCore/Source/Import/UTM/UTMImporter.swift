@@ -15,7 +15,7 @@ struct UTMImporter: VMImporter {
 
     @discardableResult
     func importVirtualMachine(from path: FilePath, into library: VMLibraryController) async throws -> VBVirtualMachine {
-        let errorPrefix = "This \(appName) virtual machine has a configuration that’s not supported by VirtualBuddy."
+        let errorPrefix = "This \(appName) virtual machine has a configuration that’s not supported by Hypervisaur."
 
         let configPath = path + "config.plist"
         try configPath.isFile.require("\(errorPrefix) Missing a config.plist file.")
@@ -33,7 +33,7 @@ struct UTMImporter: VMImporter {
 
         let isMac = config.system.boot.operatingSystem != .linux
 
-        try isMac.require("VirtualBuddy can only import Mac virtual machines from \(appName).")
+        try isMac.require("Hypervisaur can only import Mac virtual machines from \(appName).")
 
         let drives = config.drives
         try (!drives.isEmpty).require("\(errorPrefix) No storage devices available. Needs at least a boot drive.")
@@ -61,7 +61,7 @@ struct UTMImporter: VMImporter {
             /// When importing from UTM, the file extension is removed from the image name and re-added here.
             let libraryImagePath = (FilePath(model.bundleURL) + image.filename).appendingExtension(image.format.fileExtension)
 
-            logger.debug("Copying disk to VirtualBuddy bundle disk path \(libraryImagePath)")
+            logger.debug("Copying disk to Hypervisaur bundle disk path \(libraryImagePath)")
 
             try imageSource.copy(libraryImagePath)
 

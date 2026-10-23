@@ -458,7 +458,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
         }
 
         /// Run TSS check before download to prevent user from spending the time/bandwidth to download a build that will not install successfully.
-        if data.systemType == .mac, VBSettings.current.enableTSSCheck {
+        if data.systemType == .mac, VBAPIClient.isRemoteServiceEnabled, VBSettings.current.enableTSSCheck {
             UILog("Requesting TSS check before download.")
 
             Task {
@@ -923,7 +923,7 @@ final class VMInstallationViewModel: ObservableObject, @unchecked Sendable {
 
     private func uniqueLogExportDirectory(in parentDirectoryURL: URL) -> URL {
         let baseName = String(
-            localized: "VirtualBuddy MobileDevice Logs",
+            localized: "Hypervisaur MobileDevice Logs",
             bundle: #bundle,
             comment: "Name of a folder containing exported MobileDevice restore logs."
         )

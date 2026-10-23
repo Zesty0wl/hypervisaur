@@ -275,7 +275,7 @@ public enum SavedSessionError: LocalizedError {
         case .invalidManifest(let reason):
             "The saved session is damaged. \(reason)"
         case .unsupportedFormat:
-            "The saved session was created by a newer version of VirtualBuddy."
+            "The saved session was created by a newer version of Hypervisaur."
         case .hostMismatch:
             "This saved session belongs to a different Mac. Saved sessions can't be resumed on a different host."
         case .configurationChanged(let reason):

@@ -78,7 +78,7 @@ struct WindowsDependenciesStep: View {
             Text("Windows Requirements")
                 .font(.system(.title, design: .rounded).weight(.medium))
 
-            Text("Windows runs using QEMU and the Hypervisor framework, with a software TPM for Windows 11, and wimlib prepares the Windows installer. VirtualBuddy installs these with Homebrew, and downloads the drivers Windows needs for its network adapter.")
+            Text("Windows runs using QEMU and the Hypervisor framework, with a software TPM for Windows 11, and wimlib prepares the Windows installer. Hypervisaur installs these with Homebrew, and downloads the drivers Windows needs for its network adapter.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

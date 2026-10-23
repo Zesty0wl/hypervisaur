@@ -145,7 +145,7 @@ struct ManagedDiskImageEditor: View {
         if isExistingDiskImage {
             sizeChangeInfo
         } else {
-            "\(sizeMessagePrefix ?? "")After adding the storage device, it won't be possible to change the size of its disk image with VirtualBuddy."
+            "\(sizeMessagePrefix ?? "")After adding the storage device, it won't be possible to change the size of its disk image with Hypervisaur."
         }
     }
 

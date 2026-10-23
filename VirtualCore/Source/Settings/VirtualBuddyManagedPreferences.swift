@@ -2,7 +2,7 @@ import ManagedPreferencesKit
 import OSLog
 
 public enum VirtualBuddyManagedPreferences: ManagedPreferencesNamespace {
-    public static let schema = Schema(domain: "codes.rambo.VirtualBuddy", displayName: "VirtualBuddy") {
+    public static let schema = Schema(domain: "com.neiljohn.hypervisaur", displayName: "Hypervisaur") {
         Group("Sharing") {
             Preference<Bool>.disableSharedFolders
             Preference<Bool>.disableGuestApp
@@ -31,7 +31,7 @@ public enum VirtualBuddyManagedPreferences: ManagedPreferencesNamespace {
 public extension ManagedPreference where Namespace == VirtualBuddyManagedPreferences, Value == Bool {
     static let disableSharedFolders = Self("DisableSharedFolders", title: "Disable Shared Folders", default: false) {
         Summary("Disables host folder sharing for all virtual machines.")
-        Discussion("Deploy this Boolean in the VirtualBuddy preference domain using an MDM configuration profile. It applies to macOS and Linux guests, including existing virtual machines.")
+        Discussion("Deploy this Boolean in the Hypervisaur preference domain using an MDM configuration profile. It applies to macOS and Linux guests, including existing virtual machines.")
         DefaultBehavior("Shared folders are available when this preference is absent or false. Invalid values fall back to false.")
         Behavior("Disables shared folder controls and rejects attempts to add folders, with a policy message in the log.")
         Behavior("Ignores saved folder mappings when starting or restoring a VM. Mappings remain saved so they can be used after the restriction is removed.")
@@ -45,7 +45,7 @@ public extension ManagedPreference where Namespace == VirtualBuddyManagedPrefere
     }
 
     static let disableGuestApp = Self("DisableGuestApp", title: "Disable Guest App Mounting", default: false) {
-        Summary("Prevents VirtualBuddy from mounting its guest app installer disk.")
+        Summary("Prevents Hypervisaur from mounting its guest app installer disk.")
         DefaultBehavior("The feature follows the VM configuration when this preference is absent or false. Invalid values fall back to false.")
         Behavior("Applies when starting a macOS VM. The guest app mounting control is disabled and the installer disk is omitted, including when constructing a VM for snapshot restoration.")
         Behavior("Does not uninstall, stop, or disable an app already installed in the guest. Existing guest communication and clipboard sharing are unaffected.")

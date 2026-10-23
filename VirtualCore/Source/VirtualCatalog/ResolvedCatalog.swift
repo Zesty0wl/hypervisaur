@@ -285,7 +285,7 @@ extension CatalogLegacyGuestAppVersion {
 }
 
 public extension CatalogLegacyGuestAppVersion {
-    /// Run `defaults write codes.rambo.VirtualBuddy VBAllowAllGuestAppVersions -bool YES` to force-enable all guest app versions in the override UI.
+    /// Run `defaults write com.neiljohn.hypervisaur VBAllowAllGuestAppVersions -bool YES` to force-enable all guest app versions in the override UI.
     private static var allowAllGuestAppVersions: Bool { UserDefaults.standard.bool(forKey: "VBAllowAllGuestAppVersions") }
 
     func supports(_ image: ResolvedRestoreImage?) -> Bool {

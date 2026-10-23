@@ -8,7 +8,7 @@ typealias WindowUpdatingClosure = (_ perform: () -> Void) -> Void
 
 extension Notification.Name {
     /// Notification sent from ``DeepLinkHandler`` when it wants the SwiftUI app to open the library window.
-    static let openVirtualBuddyLibraryWindow = Notification.Name("codes.rambo.VirtualBuddy.OpenLibraryWindow")
+    static let openVirtualBuddyLibraryWindow = Notification.Name("com.neiljohn.hypervisaur.OpenLibraryWindow")
 }
 
 final class DeepLinkHandler {
@@ -51,7 +51,7 @@ final class DeepLinkHandler {
 
     private lazy var logger = Logger(subsystem: kShellAppSubsystem, category: String(describing: Self.self))
 
-    private let namespace = "VirtualBuddy"
+    private let namespace = "Hypervisaur"
     private let keyID = "c3bfea24ee1ca95700a4e56d73097aac"
 
     private(set) lazy var sentinel = DeepLinkSentinel(

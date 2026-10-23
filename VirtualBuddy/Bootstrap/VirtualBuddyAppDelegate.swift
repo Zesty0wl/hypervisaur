@@ -104,8 +104,8 @@ import SwiftUI
             logger.debug("Assertion doesn't handle should terminate, performing default handling")
 
             let alert = NSAlert()
-            alert.messageText = "Quit VirtualBuddy?"
-            alert.informativeText = "VirtualBuddy is currently \(firstValidAssertion.reason). This will be cancelled if you quit the app."
+            alert.messageText = "Quit Hypervisaur?"
+            alert.informativeText = "Hypervisaur is currently \(firstValidAssertion.reason). This will be cancelled if you quit the app."
 
             let button = alert.addButton(withTitle: "Quit")
             button.hasDestructiveAction = true

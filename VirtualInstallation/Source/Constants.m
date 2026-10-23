@@ -1,6 +1,6 @@
 #import <VirtualInstallation/Constants.h>
 
-NSString * const kVirtualInstallationSubsystem = @"codes.rambo.VirtualInstallation";
+NSString * const kVirtualInstallationSubsystem = @"com.neiljohn.hypervisaur.VirtualInstallation";
 
 NSString * const kVirtualInstallationServiceName = VI_SERVICE_BUNDLE_IDENTIFIER;
 

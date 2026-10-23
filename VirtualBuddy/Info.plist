@@ -7,14 +7,32 @@
 		<dict>
 			<key>CFBundleTypeExtensions</key>
 			<array>
+				<string>hypervisaur</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Hypervisaur VM</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.neiljohn.hypervisaur.vm</string>
+			</array>
+			<key>LSTypeIsPackage</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
 				<string>vbvm</string>
 			</array>
 			<key>CFBundleTypeName</key>
 			<string>VirtualBuddy VM</string>
 			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
+			<string>Viewer</string>
 			<key>LSHandlerRank</key>
-			<string>Owner</string>
+			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>codes.rambo.VirtualBuddy.VM</string>
@@ -30,9 +48,9 @@
 			<key>CFBundleTypeName</key>
 			<string>VirtualBuddy Saved State</string>
 			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
+			<string>Viewer</string>
 			<key>LSHandlerRank</key>
-			<string>Owner</string>
+			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>codes.rambo.VirtualBuddy.SavedState</string>
@@ -61,10 +79,10 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>codes.rambo.VirtualBuddy.Action</string>
+			<string>com.neiljohn.hypervisaur.action</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>virtualbuddy</string>
+				<string>hypervisaur</string>
 			</array>
 		</dict>
 	</array>
@@ -73,11 +91,30 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
-	<key>SUPublicEDKey</key>
-	<string>$(VB_SPARKLE_PUBLIC_ED_KEY)</string>
-	<key>SUScheduledCheckInterval</key>
-	<string>$(VB_SPARKLE_CHECK_INTERVAL)</string>
 	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.composite-content</string>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Hypervisaur VM</string>
+			<key>UTTypeIcons</key>
+			<dict/>
+			<key>UTTypeIdentifier</key>
+			<string>com.neiljohn.hypervisaur.vm</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>hypervisaur</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
 			<key>UTTypeConformsTo</key>
@@ -119,9 +156,6 @@
 				</array>
 			</dict>
 		</dict>
-	</array>
-	<key>UTImportedTypeDeclarations</key>
-	<array>
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>

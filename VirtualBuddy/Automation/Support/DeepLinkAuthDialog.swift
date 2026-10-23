@@ -81,7 +81,7 @@ struct DeepLinkAuthDialog: View {
                     .offset(x: 8, y: 8)
             }
 
-            Text("\"\(appName)\" would like to access and control your virtual machines in VirtualBuddy.")
+            Text("\"\(appName)\" would like to access and control your virtual machines in Hypervisaur.")
                 .lineLimit(nil)
                 .font(.headline)
                 .multilineTextAlignment(.center)

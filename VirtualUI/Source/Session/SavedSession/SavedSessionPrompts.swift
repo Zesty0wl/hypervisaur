@@ -38,11 +38,11 @@ enum SavedSessionPrompts {
             alert.informativeText = """
             \(reason)
 
-            The virtual machine has to be shut down before it can be \(quitting ? "left" : "closed"). VirtualBuddy waits for the guest to shut down.
+            The virtual machine has to be shut down before it can be \(quitting ? "left" : "closed"). Hypervisaur waits for the guest to shut down.
             """
         } else {
             alert.messageText = "Shut Down “\(name)”?"
-            alert.informativeText = "The virtual machine has to be shut down before it can be \(quitting ? "left" : "closed"). VirtualBuddy waits for the guest to shut down."
+            alert.informativeText = "The virtual machine has to be shut down before it can be \(quitting ? "left" : "closed"). Hypervisaur waits for the guest to shut down."
         }
 
         alert.addButton(withTitle: "Shutdown")
@@ -60,10 +60,10 @@ enum SavedSessionPrompts {
             alert.informativeText = names
                 .map { item in item.reason.map { "“\(item.name)”: \($0)" } ?? "“\(item.name)” has to be shut down." }
                 .joined(separator: "\n\n")
-                + "\n\nThey have to be shut down before VirtualBuddy can quit. VirtualBuddy waits for the guests to shut down."
+                + "\n\nThey have to be shut down before Hypervisaur can quit. Hypervisaur waits for the guests to shut down."
         } else {
             alert.messageText = names.count == 1 ? "Shut Down “\(names[0].name)”?" : "Shut Down \(names.count) Virtual Machines?"
-            alert.informativeText = "They have to be shut down before VirtualBuddy can quit. VirtualBuddy waits for the guests to shut down."
+            alert.informativeText = "They have to be shut down before Hypervisaur can quit. Hypervisaur waits for the guests to shut down."
         }
 
         alert.addButton(withTitle: "Shutdown")
@@ -85,7 +85,7 @@ enum SavedSessionPrompts {
         alert.informativeText = """
         \(error.localizedDescription)
 
-        \(quitting ? "VirtualBuddy hasn’t quit." : "The virtual machine is still open.")
+        \(quitting ? "Hypervisaur hasn’t quit." : "The virtual machine is still open.")
         """
         alert.addButton(withTitle: "Retry")
         alert.addButton(withTitle: "Keep Open")
@@ -101,7 +101,7 @@ enum SavedSessionPrompts {
     static func confirmShutDown(name: String, from window: NSWindow?) async -> Bool {
         let alert = NSAlert()
         alert.messageText = "Shut Down “\(name)”?"
-        alert.informativeText = "The guest will be asked to shut down. The virtual machine’s session won’t be saved, so it starts up from scratch next time. VirtualBuddy waits for the guest to finish shutting down."
+        alert.informativeText = "The guest will be asked to shut down. The virtual machine’s session won’t be saved, so it starts up from scratch next time. Hypervisaur waits for the guest to finish shutting down."
         alert.addButton(withTitle: "Shut Down")
         alert.addButton(withTitle: "Cancel")
 
@@ -237,7 +237,7 @@ enum SavedSessionPrompts {
     static func presentLegacySavedState(at url: URL) {
         let alert = NSAlert()
         alert.messageText = "Can’t Resume This Saved State"
-        alert.informativeText = "This saved state was created by an earlier version of VirtualBuddy, which didn’t keep a copy of the virtual machine’s disks with it. Resuming it could corrupt the virtual machine, so VirtualBuddy won’t. The file hasn’t been changed."
+        alert.informativeText = "This saved state was created by an earlier version of Hypervisaur, which didn’t keep a copy of the virtual machine’s disks with it. Resuming it could corrupt the virtual machine, so Hypervisaur won’t. The file hasn’t been changed."
         alert.addButton(withTitle: "Show in Finder")
         alert.addButton(withTitle: "OK")
 

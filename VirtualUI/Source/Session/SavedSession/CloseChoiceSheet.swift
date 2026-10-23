@@ -66,7 +66,7 @@ struct CloseChoiceSheet: View {
                 }
             }
 
-            Text("A saved state stays with the virtual machine on this Mac. Shared folders and network connections aren’t preserved, and a saved state may stop working after macOS or VirtualBuddy updates. To keep a particular state around, duplicate the saved virtual machine before resuming it.")
+            Text("A saved state stays with the virtual machine on this Mac. Shared folders and network connections aren’t preserved, and a saved state may stop working after macOS or Hypervisaur updates. To keep a particular state around, duplicate the saved virtual machine before resuming it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

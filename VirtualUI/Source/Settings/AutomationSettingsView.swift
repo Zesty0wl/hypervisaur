@@ -21,7 +21,7 @@ struct AutomationSettingsView: View {
         Form {
             Section {
                 if descriptors.isEmpty {
-                    Text("Apps that try to control VirtualBuddy will show up here.")
+                    Text("Apps that try to control Hypervisaur will show up here.")
                         .foregroundStyle(.tertiary)
                 } else {
                     ForEach(descriptors) { descriptor in
@@ -38,14 +38,14 @@ struct AutomationSettingsView: View {
                     }
                 }
             } header: {
-                Text("Allow Apps to Control VirtualBuddy")
+                Text("Allow Apps to Control Hypervisaur")
             } footer: {
                 if !descriptors.isEmpty {
                     SettingsFooter {
                         Text("""
                         These apps have previously tried to open a deep link in VirtualBuddy.
                         
-                        When an app tries to open a deep link in VirtualBuddy for the first time, you'll be asked to grant permission. \
+                        When an app tries to open a deep link in Hypervisaur for the first time, you'll be asked to grant permission. \
                         Once you've allowed it, the app can open deep links without asking again.
                         """)
                     }

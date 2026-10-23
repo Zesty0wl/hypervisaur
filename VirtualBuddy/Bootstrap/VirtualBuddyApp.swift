@@ -10,7 +10,7 @@ import VirtualCore
 import VirtualUI
 import OSLog
 
-let kShellAppSubsystem = "codes.rambo.VirtualBuddy"
+let kShellAppSubsystem = "com.neiljohn.hypervisaur"
 private let logger = Logger(subsystem: kShellAppSubsystem, category: "VirtualBuddyApp")
 
 struct VirtualBuddyApp: App {
@@ -56,6 +56,12 @@ struct VirtualBuddyApp: App {
                 }
             }
             #endif
+
+            CommandGroup(after: .newItem) {
+                Button("Import Virtual Machine…") {
+                    sessionManager.launchImportVirtualMachinePanel(library: library)
+                }
+            }
 
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {

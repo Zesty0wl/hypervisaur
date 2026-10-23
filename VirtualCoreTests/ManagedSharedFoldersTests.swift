@@ -73,12 +73,12 @@ struct ManagedSharedFoldersTests {
         let schema = VirtualBuddyManagedPreferences.schema
         let markdown = schema.markdownDocumentation()
         #expect(markdown.contains("DisableSharedFolders"))
-        #expect(markdown.contains("codes.rambo.VirtualBuddy"))
+        #expect(markdown.contains("com.neiljohn.hypervisaur"))
         #expect(!markdown.contains("AllowedNetworkModes"))
 
         let data = try schema.profileManifestData()
         let manifest = try #require(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
-        #expect(manifest["pfm_domain"] as? String == "codes.rambo.VirtualBuddy")
+        #expect(manifest["pfm_domain"] as? String == "com.neiljohn.hypervisaur")
         let subkeys = try #require(manifest["pfm_subkeys"] as? [[String: Any]])
         let preference = try #require(subkeys.first { $0["pfm_name"] as? String == "DisableSharedFolders" })
         #expect(preference["pfm_type"] as? String == "boolean")

@@ -15,7 +15,7 @@ public enum WindowsGuestStatus: String, Codable, Sendable {
     /// Someone has signed in to Windows and the desktop has started.
     case signedIn
 
-    static let portName = "virtualbuddy.status"
+    static let portName = "hypervisaur.status"
     static let startedMessage = "started"
     static let signedInMessage = "signed-in"
 

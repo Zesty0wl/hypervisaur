@@ -57,9 +57,9 @@ public extension Bundle {
         }
     }
 
-    /// The full version description such as "VirtualBuddy (Beta 2.0 - 123)", or just "VirtualBuddy" for release builds.
+    /// The full version description such as "Hypervisaur (Beta 2.0 - 123)", or just "Hypervisaur" for release builds.
     var vbFullVersionDescription: String {
-        let appName = "VirtualBuddy"
+        let appName = "Hypervisaur"
         if vbBuildType.name != nil {
             return "\(appName) (\(vbBuildDescription))"
         } else {

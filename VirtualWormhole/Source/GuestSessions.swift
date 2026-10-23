@@ -68,7 +68,7 @@ final class GuestSessionEngine {
     private let connection: any GuestConnection
     private let hostClipboard: HostClipboardCoordinator?
     private let providers: GuestFeatureProviders
-    private let logger = Logger(subsystem: "codes.rambo.VirtualWormhole", category: "GuestSession")
+    private let logger = Logger(subsystem: VirtualWormholeConstants.subsystemName, category: "GuestSession")
     private let identity = UUID()
     private var session: UUID?
     private var runTask: Task<Void, Never>?

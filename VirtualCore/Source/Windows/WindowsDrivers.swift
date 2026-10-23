@@ -21,7 +21,7 @@ public enum WindowsDrivers {
     /// Where the drivers are kept on the host.
     static var directoryURL: URL {
         let applicationSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let bundleID = Bundle.main.bundleIdentifier ?? "VirtualBuddy"
+        let bundleID = Bundle.main.bundleIdentifier ?? "Hypervisaur"
 
         return applicationSupportURL
             .appending(path: bundleID, directoryHint: .isDirectory)

@@ -568,7 +568,7 @@ public final class VMController: ObservableObject {
     private func presentDiskResizeError(_ error: Error) {
         let alert = NSAlert()
         alert.messageText = "Disk Resize Failed"
-        alert.informativeText = "VirtualBuddy couldn't resize disk images before startup. The virtual machine was not started.\n\n\(error.localizedDescription)"
+        alert.informativeText = "Hypervisaur couldn't resize disk images before startup. The virtual machine was not started.\n\n\(error.localizedDescription)"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -662,7 +662,7 @@ public final class VMController: ObservableObject {
         alert.messageText = "Guest App Image Error"
         alert.informativeText =
         """
-        An error occurred when VirtualBuddy attempted to generate the disk image for the guest app. Restarting the app might fix it.
+        An error occurred when Hypervisaur attempted to generate the disk image for the guest app. Restarting the app might fix it.
         
         The virtual machine will boot normally, but the guest app disk image will not be mounted.
         
@@ -1192,7 +1192,7 @@ public extension VMController {
 
 public extension VBMacConfiguration {
     /// DFU mode option is currently shown in debug builds or when `VBShowDFUModeBootOption` is set in user defaults.
-    /// To enable in release builds: `defaults write codes.rambo.VirtualBuddy VBShowDFUModeBootOption -bool YES`
+    /// To enable in release builds: `defaults write com.neiljohn.hypervisaur VBShowDFUModeBootOption -bool YES`
     static var appBuildAllowsDFUMode: Bool {
         #if DEBUG
         return true

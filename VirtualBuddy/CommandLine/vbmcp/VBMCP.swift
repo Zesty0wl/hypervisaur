@@ -3,11 +3,11 @@ import ArgumentParser
 
 /// A Model Context Protocol server for coding agents, which talks to them over standard input and output.
 ///
-/// Add it to Claude Code with `claude mcp add virtualbuddy -- "/Applications/VirtualBuddy.app/Contents/MacOS/vbmcp"`.
+/// Add it to Claude Code with `claude mcp add hypervisaur -- "/Applications/Hypervisaur.app/Contents/MacOS/vbmcp"`.
 struct VBMCP: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "vbmcp",
-        abstract: "A Model Context Protocol server for creating and running virtual machines in VirtualBuddy."
+        abstract: "A Model Context Protocol server for creating and running virtual machines in Hypervisaur."
     )
 
     func run() async throws {

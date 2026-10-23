@@ -11,7 +11,8 @@ public struct VMImporterRegistry {
     public static let `default` = VMImporterRegistry()
 
     private let importers: [VMImporter] = [
-        UTMImporter()
+        UTMImporter(),
+        VirtualBuddyImporter(),
     ]
 
     public var supportedFileTypes: Set<UTType> {

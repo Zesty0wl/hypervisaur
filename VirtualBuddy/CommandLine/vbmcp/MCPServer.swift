@@ -23,7 +23,7 @@ actor MCPServer {
     private let tools: [String: MCPTool]
     private let toolOrder: [String]
 
-    private let logger = Logger(subsystem: "codes.rambo.VirtualBuddy.vbmcp", category: "MCPServer")
+    private let logger = Logger(subsystem: "com.neiljohn.hypervisaur.vbmcp", category: "MCPServer")
     private let output = FileHandle.standardOutput
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()

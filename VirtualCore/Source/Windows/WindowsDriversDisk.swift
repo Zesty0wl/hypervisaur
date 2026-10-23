@@ -11,7 +11,7 @@ enum WindowsDriversDisk {
     static let statusScriptName = "Status.cmd"
 
     /// Changes whenever the scripts on the disk change, so that disks with older scripts are created again.
-    private static let layoutVersion = 3
+    private static let layoutVersion = 4
 
     static var contentsVersion: String { "\(WindowsDrivers.contentsVersion)/\(layoutVersion)" }
 
@@ -21,15 +21,15 @@ enum WindowsDriversDisk {
     /// The tasks run as the system account, so that no window appears when they run.
     static let setupScript = """
     @echo off
-    rem Installs the VirtIO drivers for Windows virtual machines in VirtualBuddy.
+    rem Installs the VirtIO drivers for Windows virtual machines in Hypervisaur.
 
     pnputil /add-driver "%~dp0*.inf" /subdirs /install
 
-    set "StatusScript=%ProgramData%\\VirtualBuddy\\\(statusScriptName)"
-    mkdir "%ProgramData%\\VirtualBuddy" 2>nul
+    set "StatusScript=%ProgramData%\\Hypervisaur\\\(statusScriptName)"
+    mkdir "%ProgramData%\\Hypervisaur" 2>nul
     copy /y "%~dp0\(statusScriptName)" "%StatusScript%" >nul
-    schtasks /create /f /tn "VirtualBuddy\\Started" /sc onstart /ru SYSTEM /tr "%StatusScript% startup" >nul
-    schtasks /create /f /tn "VirtualBuddy\\Signed In" /sc onlogon /ru SYSTEM /tr "%StatusScript%" >nul
+    schtasks /create /f /tn "Hypervisaur\\Started" /sc onstart /ru SYSTEM /tr "%StatusScript% startup" >nul
+    schtasks /create /f /tn "Hypervisaur\\Signed In" /sc onlogon /ru SYSTEM /tr "%StatusScript%" >nul
 
     exit /b 0
 
@@ -42,7 +42,7 @@ enum WindowsDriversDisk {
     /// finished, and ignores that account's desktop. `timeout` doesn't work without a console, so `ping` waits between checks.
     static let statusScript = """
     @echo off
-    rem Tells VirtualBuddy when Windows has started, and when someone has signed in.
+    rem Tells Hypervisaur when Windows has started, and when someone has signed in.
 
     if /i "%~1"=="startup" (
         echo \(WindowsGuestStatus.startedMessage)>\(statusPortPath)

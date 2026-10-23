@@ -451,7 +451,7 @@ public struct VBMacDevice: Hashable, Codable {
 // MARK: - Provisioning
 
 public struct VBMacProvisioningConfiguration: Hashable, Codable, Sendable {
-    public static let keychainItemService = "codes.rambo.VirtualBuddy.Provisioning"
+    public static let keychainItemService = "com.neiljohn.hypervisaur.provisioning"
     
     public var enablesRemoteLogin: Bool
     public var logsInAutomatically: Bool
@@ -643,7 +643,7 @@ public extension VBMacConfiguration {
         }
 
         guard url.isReadableDirectory else {
-            throw Failure("VirtualBuddy couldn't access the selected location, or it is not a directory.")
+            throw Failure("Hypervisaur couldn't access the selected location, or it is not a directory.")
         }
 
         guard !hasSharedFolder(with: url) else {
@@ -694,7 +694,7 @@ public extension VBSharedFolder {
         if let externalVolumeURL, !externalVolumeURL.isReadableDirectory {
             return "This directory is in a removable volume that's not currently available."
         } else {
-            return "This directory doesn't exist, or VirtualBuddy can't read it right now."
+            return "This directory doesn't exist, or Hypervisaur can't read it right now."
         }
     }
 

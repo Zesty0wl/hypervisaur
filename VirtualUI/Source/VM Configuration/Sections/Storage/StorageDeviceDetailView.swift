@@ -152,7 +152,7 @@ struct StorageDeviceDetailView: View {
         var name: String {
             switch self {
             case .managed:
-                return "VirtualBuddy Disk Image"
+                return "Hypervisaur Disk Image"
             case .custom:
                 return "Custom Image File"
             }
@@ -178,7 +178,7 @@ struct StorageDeviceDetailView: View {
                         imageType = .managed
                         device.backing = .managedImage(.template)
                     } label: {
-                        Label("Create a new disk image with VirtualBuddy", systemImage: "externaldrive.fill.badge.plus")
+                        Label("Create a new disk image with Hypervisaur", systemImage: "externaldrive.fill.badge.plus")
                     }
 
                     Button {

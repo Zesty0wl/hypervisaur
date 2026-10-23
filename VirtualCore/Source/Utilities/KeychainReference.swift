@@ -4,7 +4,7 @@ import OSLog
 /// A type that can be stored in an encodable parent that wants one of its properties to reference a Keychain item.
 @propertyWrapper
 public struct KeychainReference: Codable, Sendable {
-    private let logger = Logger(subsystem: "codes.rambo.VirtualCore", category: String(describing: KeychainReference.self))
+    private let logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: String(describing: KeychainReference.self))
 
     public var wrappedValue: String {
         get { read() ?? "" }

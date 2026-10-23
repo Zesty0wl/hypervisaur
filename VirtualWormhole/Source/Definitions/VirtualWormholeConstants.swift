@@ -9,7 +9,7 @@ import Foundation
 import OSLog
 
 struct VirtualWormholeConstants {
-    static let subsystemName = "codes.rambo.VirtualWormhole"
+    static let subsystemName = "com.neiljohn.hypervisaur.VirtualWormhole"
 
 
 }

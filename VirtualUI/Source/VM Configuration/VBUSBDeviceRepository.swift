@@ -53,8 +53,9 @@ private extension USBIDDatabase {
 }
 
 private extension USBIDConfiguration {
+    /// The USB ID Repository's own copy of its list of vendor and product names.
     static let virtualBuddy = USBIDConfiguration(
-        databaseURL: VBAPIClient.Environment.current.usbIDURL,
+        databaseURL: URL(string: "https://raw.githubusercontent.com/usbids/usbids/master/usb.ids")!,
         cacheDirectoryURL: URL.defaultVirtualBuddyLibraryURL
     )
 }

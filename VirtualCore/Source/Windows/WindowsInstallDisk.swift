@@ -25,7 +25,7 @@ public enum WindowsInstallDisk {
         let toolchain = try QEMUToolchain.current()
 
         guard FileManager.default.isReadableFile(atPath: isoURL.path) else {
-            throw Failure("VirtualBuddy can’t read the Windows installer at \(isoURL.path).")
+            throw Failure("Hypervisaur can’t read the Windows installer at \(isoURL.path).")
         }
 
         onProgress(Progress(fractionCompleted: 0, description: "Opening Windows Installer"))
@@ -88,7 +88,7 @@ public enum WindowsInstallDisk {
     private static func installerContents(in directoryURL: URL) throws -> Contents {
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]
         guard let enumerator = FileManager.default.enumerator(at: directoryURL, includingPropertiesForKeys: keys) else {
-            throw Failure("VirtualBuddy couldn’t read the contents of the Windows installer.")
+            throw Failure("Hypervisaur couldn’t read the contents of the Windows installer.")
         }
 
         var totalSize: Int64 = 0

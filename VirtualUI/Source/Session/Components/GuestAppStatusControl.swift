@@ -119,7 +119,7 @@ private extension GuestAppConnectionStatus {
         case .disabled:
             "VirtualBuddyGuest is turned off for this virtual machine. To use it, shut down the virtual machine, then turn on “Enable VirtualBuddyGuest App” in the Guest App settings."
         case .unknown:
-            "This virtual machine uses a legacy version of VirtualBuddyGuest. It mounts shared folders automatically, but can’t report its status to VirtualBuddy."
+            "This virtual machine uses a legacy version of VirtualBuddyGuest. It mounts shared folders automatically, but can’t report its status to Hypervisaur."
         case .disconnected:
             "With VirtualBuddyGuest running in the virtual machine, shared folders are mounted automatically and the clipboard can be shared with your Mac."
         case .connected:

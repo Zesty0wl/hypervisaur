@@ -164,7 +164,7 @@ final class VMNetworkAttachmentHelper {
 
         guard let store = SCDynamicStoreCreate(
             nil,
-            "VirtualBuddy.VMNetworkAttachmentHelper" as CFString,
+            "Hypervisaur.VMNetworkAttachmentHelper" as CFString,
             vmNetworkAttachmentDynamicStoreCallback,
             &context
         ) else {
