@@ -52,7 +52,7 @@ public final class URLSessionDownloadBackend: NSObject, ObservableObject, Downlo
 
         resetProgress()
 
-        state = .downloading(nil, nil)
+        state = .downloading(nil)
 
         let filename = url.lastPathComponent
 
@@ -75,28 +75,15 @@ public final class URLSessionDownloadBackend: NSObject, ObservableObject, Downlo
         session.finishTasksAndInvalidate()
     }
 
-    private let minElapsedProgressForETA: Double = 0.01
-    private var elapsedTime: Double = 0
-    private var ppsObservations: [Double] = []
-    private let ppsObservationsLimit = 500
-    private var ppsAverage: Double {
-        guard !ppsObservations.isEmpty else { return -1 }
-        return ppsObservations.reduce(Double(0), +) / Double(ppsObservations.count)
-    }
+    /// How often progress is published, which is much less often than the session reports it.
+    private static let progressInterval: TimeInterval = 0.25
+    /// How far back the download speed is averaged over, which keeps it, and the time remaining, steady.
+    private static let speedInterval: TimeInterval = 8
 
-    private var pps: Double = -1
-
-    private var eta: Double = -1
-
-    private var lastProgressDate = Date()
-
-    private var progress: Double = 0
+    private var progressSamples: [(date: Date, completedBytes: Int64)] = []
 
     private func resetProgress() {
-        elapsedTime = 0
-        eta = -1
-        pps = -1
-        ppsObservations = []
+        progressSamples = []
     }
 
 }
@@ -172,40 +159,39 @@ extension URLSessionDownloadBackend: URLSessionDownloadDelegate, URLSessionDeleg
 
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         DispatchQueue.main.async { [self] in
-            let interval = Date().timeIntervalSince(lastProgressDate)
-            lastProgressDate = Date()
-
-            let percent = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-
-            updateProgress(with: percent, interval: interval)
+            updateProgress(
+                completedBytes: totalBytesWritten,
+                totalBytes: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil
+            )
         }
     }
 
-    private func updateProgress(with progress: Double, interval: Double) {
-        let currentPPS = progress / elapsedTime
+    private func updateProgress(completedBytes: Int64, totalBytes: Int64?) {
+        guard !isInFailedState else { return }
 
-        if currentPPS.isFinite && !currentPPS.isZero && !currentPPS.isNaN {
-            ppsObservations.append(currentPPS)
-            if ppsObservations.count >= ppsObservationsLimit {
-                ppsObservations.removeFirst()
-            }
+        let now = Date()
+        if let lastSample = progressSamples.last, now.timeIntervalSince(lastSample.date) < Self.progressInterval {
+            return
         }
 
-        elapsedTime += interval
+        progressSamples.append((now, completedBytes))
+        progressSamples.removeAll { now.timeIntervalSince($0.date) > Self.speedInterval }
 
-        if self.progress > self.minElapsedProgressForETA {
-            if pps < 0 {
-                pps = progress / elapsedTime
-            }
+        state = .downloading(DownloadProgress(
+            completedBytes: completedBytes,
+            totalBytes: totalBytes,
+            bytesPerSecond: bytesPerSecond
+        ))
+    }
 
-            eta = (1/ppsAverage) - elapsedTime
+    /// The average download speed over the last few seconds, once there's at least a second to go on.
+    private var bytesPerSecond: Double? {
+        guard let first = progressSamples.first, let last = progressSamples.last else { return nil }
 
-            self.state = .downloading(progress, eta)
-        } else {
-            self.state = .downloading(progress, nil)
-        }
+        let interval = last.date.timeIntervalSince(first.date)
+        guard interval >= 1 else { return nil }
 
-        self.progress = progress
+        return Double(last.completedBytes - first.completedBytes) / interval
     }
 
 }

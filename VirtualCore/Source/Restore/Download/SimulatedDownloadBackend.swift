@@ -26,7 +26,12 @@ public final class SimulatedDownloadBackend: NSObject, DownloadBackend {
             if progress >= 1.0 {
                 stateSubject.send(.done(Self.localFileURL))
             } else {
-                stateSubject.send(.downloading(progress, progress >= 0.15 ? 100 - progress * 100 : 0))
+                let totalBytes: Int64 = 8_000_000_000
+                stateSubject.send(.downloading(DownloadProgress(
+                    completedBytes: Int64(Double(totalBytes) * progress),
+                    totalBytes: totalBytes,
+                    bytesPerSecond: progress >= 0.15 ? Double(totalBytes) / 10 : nil
+                )))
             }
         }
         self.timer = timer

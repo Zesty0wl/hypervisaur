@@ -17,7 +17,7 @@ struct RestoreImageDownloadView: View {
         switch downloadState {
         case .idle, .preCheck: 0
         case .failed: nil
-        case .downloading(let progress, _): progress ?? 0
+        case .downloading(let progress): progress?.fractionCompleted ?? 0
         case .done: 1
         }
     }
@@ -26,7 +26,7 @@ struct RestoreImageDownloadView: View {
         switch downloadState {
         case .idle: Text("Preparing Download")
         case .preCheck(let message): Text(message)
-        case .downloading(_, let eta): eta.flatMap { Text(formattedETA(from: $0)) } ?? Text("Downloading")
+        case .downloading(let progress): progress.map { Text(Self.description(of: $0)) } ?? Text("Downloading")
         case .done: Text("Done!")
         case .failed(let message): Text(message)
         }
@@ -49,18 +49,22 @@ struct RestoreImageDownloadView: View {
         .onReceive(viewModel.$downloadState) { downloadState = $0 }
     }
 
-    private func formattedETA(from eta: Double) -> String {
-        let time = Int(eta)
+    /// Such as "1.2 GB of 4.1 GB", then "52.3 MB/s, 1 min, 5 sec left" on the next line.
+    private static func description(of progress: DownloadProgress) -> String {
+        let completed = progress.completedBytes.formatted(.byteCount(style: .file))
+        let amount = progress.totalBytes.map { "\(completed) of \($0.formatted(.byteCount(style: .file)))" } ?? completed
 
-        let seconds = time % 60
-        let minutes = (time / 60) % 60
-        let hours = (time / 3600)
+        guard let bytesPerSecond = progress.bytesPerSecond else { return amount }
 
-        if hours >= 1 {
-            return String(format: "%0.2d:%0.2d:%0.2d",hours,minutes,seconds)
-        } else {
-            return String(format: "%0.2d:%0.2d",minutes,seconds)
-        }
+        let speed = "\(Int64(bytesPerSecond).formatted(.byteCount(style: .file)))/s"
+
+        guard let remaining = progress.estimatedTimeRemaining else { return "\(amount)\n\(speed)" }
+
+        let timeLeft = Duration.seconds(remaining.rounded()).formatted(
+            .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2)
+        )
+
+        return "\(amount)\n\(speed), \(timeLeft) left"
     }
 }
 
