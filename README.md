@@ -6,6 +6,10 @@
 
 <p align="center">Run macOS, Linux and Windows 11 virtual machines on Apple silicon Macs.</p>
 
+<p align="center">
+  <img src="./assets/Screenshots/Windows.png" width="800" alt="Windows 11 at its desktop in a Hypervisaur window">
+</p>
+
 ## About this project
 
 Hypervisaur is a fork of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) by Guilherme Rambo. Almost everything that makes it work for macOS and Linux virtual machines is his work, and it keeps VirtualBuddy's BSD license and copyright notice. It's an independent project, not affiliated with or endorsed by VirtualBuddy, so please report problems with Hypervisaur here rather than to VirtualBuddy.
@@ -13,6 +17,10 @@ Hypervisaur is a fork of [VirtualBuddy](https://github.com/insidegui/VirtualBudd
 Hypervisaur adds Windows 11 virtual machines, running with QEMU, and a server that lets coding agents create and run virtual machines. Much of that was written with [Claude Code](https://claude.com/claude-code), Anthropic's coding agent, and reviewed and tested on real virtual machines. VirtualBuddy doesn't accept contributions written with AI tools, which is why these changes live in a fork instead.
 
 ## Features
+
+<p align="center">
+  <img src="./assets/Screenshots/Library.png" width="560" alt="The Hypervisaur library window with a Windows virtual machine">
+</p>
 
 - **macOS virtual machines** on macOS 12 or later, using Apple's Virtualization framework, with the macOS versions available to download built in
 - **Linux virtual machines**, from the distributions in the built-in catalog or any ARM64 disc image
