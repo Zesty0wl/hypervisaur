@@ -1,7 +1,6 @@
 import SwiftUI
 import Observation
 import OSLog
-import USBIDKit
 import VirtualCore
 
 @Observable
@@ -11,20 +10,27 @@ public final class VBUSBDeviceRepository {
 
     public static let shared = VBUSBDeviceRepository()
 
-    private var database: USBIDDatabase = USBIDDatabase(configuration: .virtualBuddy)
+    private let store = USBNameDatabase.Store(
+        remoteURL: URL(string: "https://raw.githubusercontent.com/usbids/usbids/master/usb.ids")!,
+        cacheURL: URL.defaultVirtualBuddyLibraryURL.appending(path: "usb.ids")
+    )
 
-    private init() { }
+    private var database: USBNameDatabase
+
+    private init() {
+        database = store.cached() ?? .empty
+    }
 
     private var updateTask: Task<Void, Never>?
 
     public func updateIfNeeded() {
-        guard updateTask == nil else { return }
+        guard updateTask == nil, store.needsRefresh else { return }
 
         updateTask = Task {
             defer { updateTask = nil }
 
             do {
-                self.database = try await database.refreshed()
+                self.database = try await store.refreshed()
             } catch {
                 logger.warning("Database update failed: \(error, privacy: .public)")
             }
@@ -35,27 +41,7 @@ public final class VBUSBDeviceRepository {
         VBUSBDevice(
             vendorID: vendorID,
             productID: productID,
-            name: database.deviceDisplayName(vendorID: vendorID, productID: productID)
+            name: database.displayName(vendorID: vendorID, productID: productID) ?? "USB Device"
         )
     }
-}
-
-private extension USBIDDatabase {
-    func deviceDisplayName(vendorID: UInt16, productID: UInt16) -> String {
-        let result = lookup(vendorID: vendorID, productID: productID)
-
-        return switch result {
-        case .vendorOnly(let vendor): "\(vendor.displayName) Device"
-        case .product(_, let product): product.name
-        case nil: "USB Device"
-        }
-    }
-}
-
-private extension USBIDConfiguration {
-    /// The USB ID Repository's own copy of its list of vendor and product names.
-    static let virtualBuddy = USBIDConfiguration(
-        databaseURL: URL(string: "https://raw.githubusercontent.com/usbids/usbids/master/usb.ids")!,
-        cacheDirectoryURL: URL.defaultVirtualBuddyLibraryURL
-    )
 }

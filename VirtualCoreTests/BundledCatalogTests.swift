@@ -18,6 +18,16 @@ struct BundledCatalogTests {
         }
     }
 
+    @Test func legacyGuestAppsComeFromHypervisaursRepository() throws {
+        let catalog = try VBAPIClient.fetchBuiltInCatalog(for: .mac)
+
+        #expect(!catalog.legacyGuestAppVersions.isEmpty)
+        for version in catalog.legacyGuestAppVersions {
+            #expect(version.url.absoluteString.hasPrefix(SoftwareCatalog.legacyGuestAppBaseURL.absoluteString))
+            #expect(version.url.lastPathComponent == "\(version.id).dmg")
+        }
+    }
+
     @Test func remoteServicesAreNotUsed() {
         #expect(!VBAPIClient.isRemoteServiceEnabled)
     }

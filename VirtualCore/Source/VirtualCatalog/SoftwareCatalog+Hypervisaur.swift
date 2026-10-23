@@ -13,6 +13,21 @@ extension SoftwareCatalog {
         }
         return catalog
     }
+
+    /// Where Hypervisaur's repository publishes the legacy guest apps, which are the same files that VirtualBuddy publishes.
+    static let legacyGuestAppBaseURL = URL(string: "https://raw.githubusercontent.com/Zesty0wl/hypervisaur/main/data/LegacyGuestApp/")!
+
+    /// The built-in catalog refers to the legacy guest apps in VirtualBuddy's repository. Hypervisaur's repository has
+    /// the same files, which are checked against the catalog's digests after they're downloaded.
+    func usingHypervisaurLegacyGuestApps() -> SoftwareCatalog {
+        var catalog = self
+        catalog.legacyGuestAppVersions = legacyGuestAppVersions.map { version in
+            var version = version
+            version.url = Self.legacyGuestAppBaseURL.appending(path: version.url.lastPathComponent)
+            return version
+        }
+        return catalog
+    }
 }
 
 private extension CatalogGraphic {

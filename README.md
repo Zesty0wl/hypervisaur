@@ -1,94 +1,105 @@
-<img src="./assets/VirtualBuddyIcon.png" width="128" />
+<p align="center">
+  <img src="./assets/AppIcon/Hypervisaur-2048.png" width="160" alt="The Hypervisaur app icon, a T. rex head on a teal background">
+</p>
 
-# VirtualBuddy
+<h1 align="center">Hypervisaur</h1>
 
-VirtualBuddy can virtualize macOS 12 and later on Apple Silicon, with the goal of offering features that are useful to developers who need to test their apps on multiple versions of macOS, especially betas.
+<p align="center">Run macOS, Linux and Windows 11 virtual machines on Apple silicon Macs.</p>
 
-![](./assets/Showcase.jpg)
+## About this project
 
-## System Requirements
+Hypervisaur is a fork of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) by Guilherme Rambo. Almost everything that makes it work for macOS and Linux virtual machines is his work, and it keeps VirtualBuddy's BSD license and copyright notice. It's an independent project, not affiliated with or endorsed by VirtualBuddy, so please report problems with Hypervisaur here rather than to VirtualBuddy.
 
-- **Apple Silicon Mac**
-- macOS 13 or later
+Hypervisaur adds Windows 11 virtual machines, running with QEMU, and a server that lets coding agents create and run virtual machines. Much of that was written with [Claude Code](https://claude.com/claude-code), Anthropic's coding agent, and reviewed and tested on real virtual machines. VirtualBuddy doesn't accept contributions written with AI tools, which is why these changes live in a fork instead.
 
-### Installing macOS
+## Features
 
-To install a macOS virtual machine, you can select from a list of macOS versions provided by VirtualBuddy, which will automatically download and install the selected version. You may also provide your own IPSW link or select from an IPSW you have already downloaded.
+- **macOS virtual machines** on macOS 12 or later, using Apple's Virtualization framework, with the macOS versions available to download built in
+- **Linux virtual machines**, from the distributions in the built-in catalog or any ARM64 disc image
+- **Windows 11 virtual machines**, installed from Microsoft's Windows 11 ARM64 disc image, optionally without going through Windows Setup at all
+- Shared folders, clipboard sharing and saved sessions for macOS guests
+- Importing virtual machines from VirtualBuddy and UTM
+- An [MCP](https://modelcontextprotocol.io) server, so a coding agent can build a Windows virtual machine for you
 
-### ⚠️ Important Note About macOS Golden Gate
+## Requirements
 
-To install macOS Golden Gate beta on a macOS 26 host, make sure you are running [VirtualBuddy 2.2 beta 2](https://github.com/insidegui/VirtualBuddy/releases/tag/2.2-b2) or later and that you have downloaded and installed the [latest device support files](https://developer.apple.com/services-account/download?path=/Developer_Tools/RaveMobileDeviceSeed2050A3n/DeviceSupport_macOS_27_beta.dmg) from Apple. If you already have the Xcode 27 beta installed, then you don't need to install the device support files separately.
+- A Mac with Apple silicon
+- macOS 14 or later
+- For Windows virtual machines, [Homebrew](https://brew.sh) and the [Windows 11 ARM64 disc image](https://www.microsoft.com/software-download/windows11arm64) from Microsoft
 
-### Installing macOS Betas
+## Installing
 
-If you’d like to run a virtual machine with a macOS beta that’s more recent than the one you’re currently running, such as a macOS 15 virtual machine running in a macOS 14 host, then you’ll need the latest device support package from Apple. 
+Download the latest release from the [Releases](../../releases) page, open the disk image and drag Hypervisaur to your Applications folder.
 
-Device support packages are sometimes made available by Apple directly, but they’re always included and installed automatically with the latest Xcode beta. These can be obtained from the [Apple Developer portal](https://developer.apple.com/download).
+Hypervisaur doesn't update itself yet. Check the Releases page for new versions.
 
-![Screenshot of the Apple Developer device support download](./assets/DeviceSupport.png)
+## Windows virtual machines
 
-## Download
+Choose Windows when creating a virtual machine. Hypervisaur first checks for what Windows needs on your Mac, and installs anything that's missing with a single click:
 
-VirtualBuddy is free and open-source. If you’d like to support its development, [you may purchase it on Gumroad](https://insidegui.gumroad.com/l/virtualbuddy) or [sponsor my work on GitHub](https://github.com/sponsors/insidegui).
+| Component | What it's for |
+| --- | --- |
+| [QEMU](https://www.qemu.org) | Runs Windows with the Hypervisor framework, using the UEFI firmware that comes with it |
+| [swtpm](https://github.com/stefanberger/swtpm) | The TPM 2.0 that Windows 11 requires |
+| [wimlib](https://wimlib.net) | Copies the Windows installer onto a disk that the virtual machine can start from quickly |
+| Windows drivers | The virtio drivers for the network adapter, display and other devices, signed by Microsoft. They're downloaded from [UTM's guest tools](https://github.com/utmapp/qemu/releases) and checked against a known checksum |
 
-If you’d just like to download the latest version, [go to GitHub releases](https://github.com/insidegui/VirtualBuddy/releases/latest).
+QEMU, swtpm and wimlib come from Homebrew, which you need to install yourself. Then choose the Windows disc image and give the virtual machine a name. With **Set Up Windows Automatically**, Windows installs without asking anything and signs in to a local account with the name and optional password you choose. Without it, you go through Windows Setup as usual.
 
-If you use [homebrew](https://brew.sh), install with `brew install --cask virtualbuddy`.
+Installing takes about 10 minutes. Windows Setup uses a basic 800×600 display; afterwards, Windows uses the resolution in the virtual machine's display settings.
 
-### Feature Checklist
+### Things to know
 
-- [x] Ability to boot any version of macOS 12 or macOS 13, including betas
-- [x] Ability to boot some ARM-based Linux distros (tested with Ubuntu Server and Ubuntu Desktop)
-- [x] Built-in installation wizard
-	- [x] Select from a collection of restore images available on Apple’s servers
-	- [x] Install the latest stable version of macOS
-	- [x] Local restore image IPSW file
-	- [x] Custom restore image URL
-	- [x] Install a Linux distro from a local .iso file
-	- [x] Select from a collection of Linux distros
-	- [x] Install Linux from URL
-- [x] Boot into recovery mode (in order to disable SIP, for example)
-- [x] Networking and file sharing support
-- [x] Clipboard sharing
-- [x] Customize virtual machine hardware configuration
-- [x] Save and restore macOS virtual machine state
+- You need your own Windows license. Windows is installed without a product key, so it isn't activated until you activate it.
+- Windows virtual machines use NAT networking, sound output and a fixed display resolution that you can change in the virtual machine's settings. Shared folders, clipboard sharing, USB devices and saved sessions aren't available for Windows yet.
+- The firmware that comes with QEMU doesn't support Secure Boot, so Windows Setup is told to skip that check.
 
-### Tips and Tricks
+## Using Hypervisaur from a coding agent
 
-#### VirtualBuddyGuest app
+Hypervisaur includes `vbmcp`, a [Model Context Protocol](https://modelcontextprotocol.io) server. Add it to Claude Code with:
 
-VirtualBuddy automatically mounts a disk image with the VirtualBuddyGuest app when you boot a supported macOS virtual machine with the guest app enabled. To install the VirtualBuddyGuest app, just select the “Guest” disk on Finder’s sidebar, then double-click the “VirtualBuddyGuest” app icon.
+```bash
+claude mcp add hypervisaur -- "/Applications/Hypervisaur.app/Contents/MacOS/vbmcp"
+```
 
-The latest VirtualBuddyGuest app requires macOS 14 or later and supports clipboard sharing and automatic mounting of shared folders. On macOS 13, the legacy guest app only mounts shared folders automatically; clipboard sharing is unavailable. VirtualBuddyGuest is not supported on macOS 12 or earlier.
+Then ask for something like "Build a Windows VM with a local user called neil, an 80 GB disk and 6 GB of memory". The agent creates the virtual machine, starts it in Hypervisaur and waits until Windows is signed in at the desktop. The first time, Hypervisaur asks whether to allow the server to control your virtual machines.
 
-![](./assets/GuestApp.jpg)
+| Tool | What it does |
+| --- | --- |
+| `create_windows_vm` | Creates a Windows 11 virtual machine and installs Windows without interaction |
+| `wait_for_windows_vm` | Waits until Windows is signed in at the desktop, reporting progress |
+| `get_windows_vm_status` | Tells whether Windows is installing, starting up or signed in |
+| `list_virtual_machines` | Lists the virtual machines in the library |
+| `start_vm`, `stop_vm` | Starts a virtual machine, or asks it to shut down |
+| `get_windows_requirements`, `install_windows_requirements` | Checks for, and installs, what Windows virtual machines need |
 
-#### Taking Advantage of APFS
+## macOS virtual machines
 
-Sometimes when trying things out in the OS installed in one of the virtual machines, things might break, requiring a full install of the guest operating system again, which is a pain.
+When you start a macOS virtual machine with the guest app enabled, Hypervisaur attaches a disk with the VirtualBuddyGuest app. Select the "Guest" disk in the Finder sidebar and open the app to install it. The guest app requires macOS 14 or later for clipboard sharing and automatic mounting of shared folders; on macOS 13, it only mounts shared folders.
 
-Thanks to APFS cloning, though, you can just duplicate a virtual machine within your library folder (using Command + D in Finder), and the copy will take almost no additional disk space. This way you can have a “clean” copy of your VM, do whatever you want with a duplicate of it, and then throw the copy away and re-duplicate the clean version if things break.
-
-#### Sharing Folders Between Host and Virtual Machine
-
-You can share folders from your Mac to the Virtual Machine and vice versa using regular macOS file sharing that can be configured in System Preferences/Settings.
-
-When both the Virtual Machine and the host are running macOS 13 or later, it’s possible to share folders directly by configuring them in the VM settings within VirtualBuddy before booting up the VM.
-
-To mount shared folders in the VM, run the following command in the VM’s Terminal:
+To mount shared folders without the guest app, run this in the virtual machine's Terminal:
 
 ```bash
 mkdir -p ~/Desktop/VirtualBuddyShared && mount -t virtiofs VirtualBuddyShared ~/Desktop/VirtualBuddyShared
 ```
 
+Virtual machines are stored in `~/Library/Application Support/Hypervisaur`. Thanks to APFS, duplicating one in Finder takes almost no extra space, which is a quick way to keep a clean copy to go back to.
+
 ## Building
 
-**Xcode 16** is required for building on `main`.
+Hypervisaur builds with Xcode 26 or later.
 
-- Open the `VirtualBuddy/Config/Signing.xcconfig` file
-- Set the `VB_BUNDLE_ID_PREFIX` variable to something unique like `com.yourname.`
-- Select the VirtualBuddy project in the Xcode sidebar
-- Under "Targets", select "VirtualBuddy"
-- Go to the Signing & Capabilities tab and select your development team under Signing > Team
-- Repeat the same process for the "VirtualBuddyGuest" target
-- Build the `VirtualBuddy` scheme (the one that **doesn't** have `(Managed)` in its name)
+1. In `VirtualBuddy/Config/Signing.xcconfig`, set `VB_BUNDLE_ID_PREFIX` to something of your own, such as `com.yourname.`
+2. In `VirtualBuddy/Config/Security.xcconfig`, set `VB_DEVELOPMENT_TEAM` to your team ID
+3. Choose your team under Signing & Capabilities for the VirtualBuddy and VirtualBuddyGuest targets
+4. Build the `VirtualBuddy` scheme
+
+The project's targets and modules keep VirtualBuddy's names so that changes from VirtualBuddy can still be merged.
+
+## Acknowledgements
+
+Hypervisaur stands on the work of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) and its contributors, and on [QEMU](https://www.qemu.org), [swtpm](https://github.com/stefanberger/swtpm), [wimlib](https://wimlib.net), [UTM](https://github.com/utmapp/UTM), the [virtio-win drivers](https://github.com/virtio-win/kvm-guest-drivers-windows), [Homebrew](https://brew.sh) and the [USB ID Repository](http://www.linux-usb.org/usb-ids.html). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licenses of the software that Hypervisaur includes or uses.
+
+## License
+
+Hypervisaur is available under the [BSD 2-Clause License](./LICENSE).

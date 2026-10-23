@@ -49,12 +49,6 @@
       },
     }, {
       "kind": "remote",
-      "repository": "https://github.com/insidegui/USBIDKit.git",
-      "version": {
-        "up-to-next-major-version": "1.0.0",
-      },
-    }, {
-      "kind": "remote",
       "repository": "https://github.com/insidegui/VMBridge.git",
       "version": {
         "branch": "main",
@@ -756,10 +750,6 @@
         }, {
           "package": "ManagedPreferencesKit",
           "product-name": "ManagedPreferencesUI",
-          "build-phase": { "build-phase": "frameworks" },
-        }, {
-          "package": "USBIDKit",
-          "product-name": "USBIDKit",
           "build-phase": { "build-phase": "frameworks" },
         }, {
           "package": "swiftui-introspect",

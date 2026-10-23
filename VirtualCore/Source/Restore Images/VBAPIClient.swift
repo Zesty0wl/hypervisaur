@@ -179,7 +179,9 @@ public final class VBAPIClient {
         let catalog = try decoder.decode(SoftwareCatalog.self, from: data)
 
         let imagesURL = url.deletingLastPathComponent().appending(path: "images", directoryHint: .isDirectory)
-        return catalog.usingBundledImages(in: imagesURL)
+        return catalog
+            .usingBundledImages(in: imagesURL)
+            .usingHypervisaurLegacyGuestApps()
     }
 
     @MainActor
