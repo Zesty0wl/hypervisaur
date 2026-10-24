@@ -1,10 +1,10 @@
-# VirtualBuddyGuest support
+# Hypervisaur Guest support
 
 | Guest | Supported features |
 | --- | --- |
-| macOS 14 or later with the latest VirtualBuddyGuest | Clipboard sharing and all current guest integration features |
-| macOS 13 with a legacy VirtualBuddyGuest | Automatic mounting of shared folders only |
-| macOS 12 or earlier | VirtualBuddyGuest is not supported |
+| macOS 14 or later with the latest Hypervisaur Guest | Clipboard sharing and all current guest integration features |
+| macOS 13 with a legacy guest app | Automatic mounting of shared folders only |
+| macOS 12 or earlier | The guest app is not supported |
 
 Archived guest apps do not support clipboard sharing with the current host, even when selected on a newer guest OS. The host no longer creates a serial connection or handles the legacy protocol. Linux SPICE integration is unchanged.
 

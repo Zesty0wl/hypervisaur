@@ -283,7 +283,7 @@
             "VirtualWormholeTests/frameworks",
           ],
         },
-        { "path": "<PRODUCTS>/VirtualBuddyGuest.app", "id": "F4C18A4228491B8500335EC7", "type": "wrapper.application", "index": false, "target-membership": [ { "build-phase": "VirtualBuddy/copy/Embed Guest App", "header-preservation": "remove-on-copy" } ] },
+        { "path": "<PRODUCTS>/Hypervisaur Guest.app", "id": "F4C18A4228491B8500335EC7", "type": "wrapper.application", "index": false, "target-membership": [ { "build-phase": "VirtualBuddy/copy/Embed Guest App", "header-preservation": "remove-on-copy" } ] },
         {
           "path": "<PRODUCTS>/VirtualUI.framework",
           "id": "F498ACFE2884BF13006F1C00",
@@ -503,7 +503,7 @@
     }, {
       "name": "VirtualBuddyGuest",
       "id": "F4C18A4128491B8500335EC7",
-      "product": "Products/VirtualBuddyGuest.app",
+      "product": "Products/Hypervisaur Guest.app",
       "product-type": "application",
       "last-swift-migration": "14.2",
       "dependencies": [
@@ -568,7 +568,8 @@
         "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Enable audio input for your virtual machines. Without this permission, virtual machines won't be able to record any audio.",
         "LD_RUNPATH_SEARCH_PATHS": "$(VB_APP_RUNPATH_SEARCH_PATHS)",
         "PRODUCT_BUNDLE_IDENTIFIER": "$(VIRTUALBUDDY_BUNDLE_ID).guest",
-        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "PRODUCT_MODULE_NAME": "VirtualBuddyGuest",
+        "PRODUCT_NAME": "Hypervisaur Guest",
         "SKIP_INSTALL": "YES",
         "SWIFT_EMIT_LOC_STRINGS": "YES",
         "SWIFT_OBJC_BRIDGING_HEADER": "VirtualBuddyGuest/Dashboard/Support/VirtualBuddyGuest-Bridging-Header.h",

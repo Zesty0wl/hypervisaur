@@ -1,10 +1,10 @@
 #!/bin/sh
 
 : '
-This script is used by VirtualBuddy to dynamically generate a disk image that can be mounted in a virtual machine,
-containing the current version of the VirtualBuddyGuest app embedded into VirtualBuddy itself.
+This script is used by Hypervisaur to dynamically generate a disk image that can be mounted in a virtual machine,
+containing the current version of the Hypervisaur Guest app embedded into Hypervisaur itself.
 
-Images are stored in ~/Library/Application Support/VirtualBuddy/_GuestImage.
+Images are stored in the folder given as the fourth argument, which is _GuestImage in the default library folder.
 
 Alongside the images, the app stores a digest of the entire contents of the Guest app bundle,
 so that it can be automatically updated whenever something changes in the Guest app.
@@ -13,7 +13,8 @@ so that it can be automatically updated whenever something changes in the Guest 
 GUEST_APP_PATH="$1"
 GUEST_APP_DIGEST="$2"
 GUEST_SIZE_ALLOCATION="$3"
-GUEST_DMG_SUFFIX="$4"
+GUEST_DMG_DEST_PATH="$4"
+GUEST_DMG_SUFFIX="$5"
 
 if [ -z "$GUEST_APP_PATH" ]; then
     echo "Shell script invocation error: missing GUEST_APP_PATH value as first argument" 1>&2
@@ -30,18 +31,20 @@ if [ -z "$GUEST_SIZE_ALLOCATION" ]; then
     exit 7
 fi
 
+if [ -z "$GUEST_DMG_DEST_PATH" ]; then
+    echo "Shell script invocation error: missing GUEST_DMG_DEST_PATH value as fourth argument" 1>&2
+    exit 7
+fi
+
 if [ ! -d "$GUEST_APP_PATH" ]; then
     echo "Shell script invocation error: guest app bundle doesn't exist at $GUEST_APP_PATH" 1>&2
     exit 7
 fi
 
-VBROOT="$HOME/Library/Application Support/VirtualBuddy"
-GUEST_DMG_DEST_PATH="$VBROOT/_GuestImage"
-
-GUEST_DMG_NAME="VirtualBuddyGuest$GUEST_DMG_SUFFIX"
+GUEST_DMG_NAME="HypervisaurGuest$GUEST_DMG_SUFFIX"
 
 GUEST_STAGING_PATH="$GUEST_DMG_DEST_PATH/staging"
-GUEST_TEMP_MOUNT_PATH="$GUEST_STAGING_PATH/VirtualBuddyGuest$GUEST_DMG_SUFFIX"
+GUEST_TEMP_MOUNT_PATH="$GUEST_STAGING_PATH/$GUEST_DMG_NAME"
 GUEST_TEMP_DMG_PATH="$GUEST_STAGING_PATH/$GUEST_DMG_NAME.dmg"
 
 GUEST_TEMP_DIGEST_PATH="$GUEST_TEMP_MOUNT_PATH/$GUEST_DMG_NAME.digest"
@@ -59,21 +62,21 @@ rm "$GUEST_TEMP_DMG_PATH" 2>/dev/null || echo ""
 # Create blank disk image
 
 hdiutil create -layout MBRSPUD -size $GUEST_SIZE_ALLOCATION -fs HFS+ -volname Guest "$GUEST_TEMP_DMG_PATH" || \
-    { echo "Failed to create VirtualBuddyGuest disk image: hdiutil exit code $?" 1>&2; exit 1; }
+    { echo "Failed to create the guest disk image: hdiutil exit code $?" 1>&2; exit 1; }
 
 # Mount image at staging location
 
 hdiutil attach -imagekey diskimage-class=CRawDiskImage -noverify "$GUEST_TEMP_DMG_PATH" -mountpoint "$GUEST_TEMP_MOUNT_PATH" || \
-    { echo "Failed to mount empty VirtualBuddyGuest disk image: hdiutil exit code $?" 1>&2; exit 1; }
+    { echo "Failed to mount the empty guest disk image: hdiutil exit code $?" 1>&2; exit 1; }
 
 # Write digest to temporary mount
 
 echo "$GUEST_APP_DIGEST" > "$GUEST_TEMP_DIGEST_PATH"
 
-# Copy VirtualBuddyGuest.app into the temporary mount
+# Copy the guest app into the temporary mount
 
 cp -R "$GUEST_APP_PATH" "$GUEST_TEMP_MOUNT_PATH/" || \
-    { echo "Failed to copy VirtualBuddyGuest.app into disk image: exit code $?" 1>&2; exit 1; }
+    { echo "Failed to copy the guest app into the disk image: exit code $?" 1>&2; exit 1; }
 
 # Copy the digest to its final destination
 
@@ -83,7 +86,7 @@ yes | cp -rf "$GUEST_TEMP_DIGEST_PATH" "$GUEST_DMG_DEST_PATH" || \
 # Eject the disk image
 
 hdiutil detach -force "$GUEST_TEMP_MOUNT_PATH" || \
-    { echo "Failed to eject VirtualBuddyGuest disk image: exit code $?" 1>&2; exit 1; }
+    { echo "Failed to eject the guest disk image: exit code $?" 1>&2; exit 1; }
 
 # Remove any extended attributes from the disk image
 

@@ -47,7 +47,7 @@ struct SharedFoldersManagementView: View {
         fileSharingUnsupported ? (fileSharingStatus?.supportMessage ?? "Not supported.") : nil
     }
 
-    /// Whether the guest's system type and OS version can run VirtualBuddyGuest.
+    /// Whether the guest's system type and OS version can run Hypervisaur Guest.
     private var guestAppSupported: Bool {
         configuration.guestAppSupport(for: resolvedRestoreImage?.version) != .unsupported
             && resolvedRestoreImage?.feature(id: CatalogFeatureID.guestApp)?.status.isUnsupported != true
@@ -301,16 +301,16 @@ struct SharedFoldersManagementView: View {
     @ViewBuilder
     private var guestAppNote: some View {
         if configuration.guestAdditionsEnabled {
-            Text("VirtualBuddyGuest is required for mounting shared folders automatically in the virtual machine.")
+            Text("Hypervisaur Guest is required for mounting shared folders automatically in the virtual machine.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
             VStack(alignment: .leading, spacing: 8) {
-                Label("VirtualBuddyGuest is required for mounting shared folders automatically, but it’s not enabled for this virtual machine.", systemImage: "exclamationmark.triangle.fill")
+                Label("Hypervisaur Guest is required for mounting shared folders automatically, but it’s not enabled for this virtual machine.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundColor(.yellow)
 
                 if !guestAppDisabled {
-                    Button("Enable VirtualBuddyGuest") {
+                    Button("Enable Hypervisaur Guest") {
                         configuration.guestAdditionsEnabled = true
                     }
                     .controlSize(.small)

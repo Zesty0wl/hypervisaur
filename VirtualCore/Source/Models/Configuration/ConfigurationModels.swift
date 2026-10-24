@@ -65,7 +65,7 @@ public struct VBMacConfiguration: Hashable, Codable {
 
     /// Manual override for which guest app version should be mounted for this virtual machine.
     ///
-    /// `nil` means use the copy of VirtualBuddyGuest that's embedded in the current build of VirtualBuddy.
+    /// `nil` means use the copy of the guest app that's embedded in the current build of Hypervisaur.
     public var guestAppVersion: CatalogLegacyGuestAppVersion.ID? = nil
 
 }

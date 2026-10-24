@@ -51,11 +51,11 @@ struct GuestAppConfigurationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Toggle("Enable VirtualBuddyGuest App", isOn: guestAppDisabled ? .constant(false) : $configuration.guestAdditionsEnabled)
+            Toggle("Enable Hypervisaur Guest App", isOn: guestAppDisabled ? .constant(false) : $configuration.guestAdditionsEnabled)
                 .disabled(guestAppUnsupported || guestAppDisabled)
                 .help(guestAppDisabled
                       ? "Guest app mounting is disabled by your organization. An already installed guest app is unaffected."
-                      : "Disabling this setting also disables communication with an already installed VirtualBuddyGuest app.")
+                      : "Disabling this setting also disables communication with an already installed Hypervisaur Guest app.")
                 .onChange(of: guestAppUnsupported, initial: true) { _, isUnsupported in
                     if isUnsupported {
                         configuration.guestAdditionsEnabled = false
@@ -94,20 +94,20 @@ struct GuestAppConfigurationView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 if support == .unsupported {
-                    Text("VirtualBuddyGuest is not supported on macOS 12 or earlier. Clipboard sharing and automatic mounting of shared folders are unavailable.")
+                    Text("Hypervisaur Guest is not supported on macOS 12 or earlier. Clipboard sharing and automatic mounting of shared folders are unavailable.")
                 } else if guestAppUnsupported {
-                    Text(guestAppStatus?.supportMessage ?? "VirtualBuddyGuest is not supported for this virtual machine.")
+                    Text(guestAppStatus?.supportMessage ?? "Hypervisaur Guest is not supported for this virtual machine.")
                 } else {
                     switch support {
                     case .sharedFoldersOnly:
-                        Text("This legacy version of VirtualBuddyGuest only mounts shared folders automatically. Clipboard sharing requires the latest VirtualBuddyGuest app and macOS \(Bundle.embeddedGuestApp.minimumSystemVersion.shortDescription) or later in the virtual machine.")
+                        Text("This legacy version of the guest app only mounts shared folders automatically. Clipboard sharing requires the latest Hypervisaur Guest app and macOS \(Bundle.embeddedGuestApp.minimumSystemVersion.shortDescription) or later in the virtual machine.")
                     case .full:
-                        Text("VirtualBuddyGuest mounts shared folders automatically and shares the clipboard between your Mac and the virtual machine.")
+                        Text("Hypervisaur Guest mounts shared folders automatically and shares the clipboard between your Mac and the virtual machine.")
                     case .unsupported:
                         EmptyView()
                     }
 
-                    Text("To install the app in your virtual machine, select the “Guest” disk in the Finder sidebar, then double-click the VirtualBuddyGuest app icon.")
+                    Text("To install the app in your virtual machine, select the “Guest” disk in the Finder sidebar, then double-click the Hypervisaur Guest app icon.")
                 }
             }
             .font(.caption)

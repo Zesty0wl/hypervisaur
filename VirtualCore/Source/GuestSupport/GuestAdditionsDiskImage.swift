@@ -42,7 +42,7 @@ public final class GuestAdditionsDiskImage: ObservableObject {
 
         var imageBaseName: String {
             switch self {
-            case .embedded: "VirtualBuddyGuest"
+            case .embedded: "HypervisaurGuest"
             case .catalog(let id): id
             }
         }
@@ -308,7 +308,8 @@ public final class GuestAdditionsDiskImage: ObservableObject {
             scriptPath,
             guestPath,
             digest,
-            "\(size)MB"
+            "\(size)MB",
+            imagesRootURL.path
         ]
 
         if let suffix = VBBuildType.current.guestAdditionsImageSuffix {
@@ -354,19 +355,19 @@ public final class GuestAdditionsDiskImage: ObservableObject {
 }
 
 public extension Bundle {
-    /// Bundle of the VirtualBuddyGuest app embedded in the app's main bundle.
+    /// Bundle of the Hypervisaur Guest app embedded in the app's main bundle.
     static let embeddedGuestApp: Bundle = {
         #if DEBUG
-        /// Allow using SwiftUI previews with VirtualUI target selected without having to embed VirtualBuddyGuest.app inside VirtualUI.
+        /// Allow using SwiftUI previews with VirtualUI target selected without having to embed the guest app inside VirtualUI.
         guard !ProcessInfo.isSwiftUIPreview else { return Bundle.main }
         #endif
         do {
-            guard let url = Bundle.main.sharedSupportURL?.appendingPathComponent("VirtualBuddyGuest.app") else {
-                throw Failure("Couldn't get VirtualBuddyGuest.app URL within main app bundle")
+            guard let url = Bundle.main.sharedSupportURL?.appendingPathComponent("Hypervisaur Guest.app") else {
+                throw Failure("Couldn't get Hypervisaur Guest.app URL within main app bundle")
             }
 
             guard FileManager.default.fileExists(atPath: url.path) else {
-                throw Failure("VirtualBuddyGuest.app doesn't exist at \(url.path)")
+                throw Failure("Hypervisaur Guest.app doesn't exist at \(url.path)")
             }
 
             guard let bundle = Bundle(url: url) else {
@@ -386,7 +387,7 @@ public extension Bundle {
 }
 
 public extension SoftwareVersion {
-    /// Version of the VirtualBuddyGuest app embedded in the app's main bundle.
+    /// Version of the Hypervisaur Guest app embedded in the app's main bundle.
     static let embeddedGuestApp = Bundle.embeddedGuestApp.softwareVersion
 }
 

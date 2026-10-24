@@ -17,6 +17,7 @@ final class GuestAppInstaller {
 
             guard needsInstall else {
                 logger.debug("Install not needed: running from supported path and update not needed. Path: \(Bundle.main.bundleURL.deletingLastPathComponent().path, privacy: .public)")
+                removeLegacyInstall()
                 return
             }
 
@@ -46,7 +47,7 @@ final class GuestAppInstaller {
             logger.error("Install failed: \(error, privacy: .public)")
 
             throw CocoaError(.coderInvalidValue, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to install the VirtualBuddyGuest app. This can occur if the Mac user account on the virtual machine can't write to /Applications.",
+                NSLocalizedDescriptionKey: "Failed to install the Hypervisaur Guest app. This can occur if the Mac user account on the virtual machine can't write to /Applications.",
                 NSUnderlyingErrorKey: error
             ])
         }
@@ -65,9 +66,39 @@ final class GuestAppInstaller {
         return false
     }
 
-    private var mountedImageAppURL: URL { URL(fileURLWithPath: "/Volumes/Guest/VirtualBuddyGuest.app") }
+    private var mountedImageAppURL: URL { URL(fileURLWithPath: "/Volumes/Guest/Hypervisaur Guest.app") }
 
-    /// `true` if there's a VirtualBuddyGuest image mounted at `/Volumes/Guest`
+    /// Earlier versions of Hypervisaur called the guest app VirtualBuddyGuest.
+    private var legacyInstallURL: URL { URL(fileURLWithPath: "/Applications/VirtualBuddyGuest.app") }
+
+    /// Removes a copy of this app that was installed under its earlier name, so that only one of them runs.
+    /// VirtualBuddy's own guest app has the same name but a different bundle identifier, so it's left alone.
+    private func removeLegacyInstall() {
+        let legacyURL = legacyInstallURL
+
+        guard legacyURL.standardizedFileURL != Bundle.main.bundleURL.standardizedFileURL,
+              let legacyBundle = Bundle(url: legacyURL),
+              legacyBundle.bundleIdentifier == Bundle.main.bundleIdentifier
+        else { return }
+
+        logger.notice("Removing the guest app installed under its earlier name at \(legacyURL.path, privacy: .public)")
+
+        for runningApp in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier!)
+            where runningApp.bundleURL?.standardizedFileURL == legacyURL.standardizedFileURL
+        {
+            if !runningApp.forceTerminate() {
+                logger.error("Failed to terminate the guest app installed under its earlier name")
+            }
+        }
+
+        do {
+            try FileManager.default.removeItem(at: legacyURL)
+        } catch {
+            logger.error("Failed to remove the guest app installed under its earlier name: \(error, privacy: .public)")
+        }
+    }
+
+    /// `true` if there's a guest app image mounted at `/Volumes/Guest`
     /// for which the following conditions are true:
     /// 1 - The guest executable in the volume has a different CDHash from this process
     /// 2 - The guest in the volume has a `CFBundleVersion` that's **greater than or equal to** the `CFBundleVersion` of this process
@@ -144,14 +175,16 @@ extension NSApplication {
     func relaunch(at path: String) throws {
         let pid = ProcessInfo.processInfo.processIdentifier
 
-        let xattrScript = "/usr/bin/xattr -d -r com.apple.quarantine \(path)"
-        let script = "(while /bin/kill -0 \(pid) >&/dev/null; do /bin/sleep 0.1; done; \(xattrScript); /usr/bin/open \(path)) &"
+        /// The path is passed as an argument rather than written into the script, because the app's name has a space in it.
+        let script = "(while /bin/kill -0 \(pid) >&/dev/null; do /bin/sleep 0.1; done; /usr/bin/xattr -d -r com.apple.quarantine \"$1\"; /usr/bin/open \"$1\") &"
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/sh")
         proc.arguments = [
             "-c",
-            script
+            script,
+            "relaunch",
+            path
         ]
 
         try proc.run()

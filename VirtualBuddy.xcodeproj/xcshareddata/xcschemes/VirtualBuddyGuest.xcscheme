@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "F4C18A4128491B8500335EC7"
-               BuildableName = "VirtualBuddyGuest.app"
+               BuildableName = "Hypervisaur Guest.app"
                BlueprintName = "VirtualBuddyGuest"
                ReferencedContainer = "container:VirtualBuddy.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "F4C18A4128491B8500335EC7"
-            BuildableName = "VirtualBuddyGuest.app"
+            BuildableName = "Hypervisaur Guest.app"
             BlueprintName = "VirtualBuddyGuest"
             ReferencedContainer = "container:VirtualBuddy.xcodeproj">
          </BuildableReference>
@@ -76,7 +76,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "F4C18A4128491B8500335EC7"
-            BuildableName = "VirtualBuddyGuest.app"
+            BuildableName = "Hypervisaur Guest.app"
             BlueprintName = "VirtualBuddyGuest"
             ReferencedContainer = "container:VirtualBuddy.xcodeproj">
          </BuildableReference>

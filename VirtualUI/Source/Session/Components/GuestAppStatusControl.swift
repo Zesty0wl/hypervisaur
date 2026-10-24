@@ -2,7 +2,7 @@ import SwiftUI
 import VirtualCore
 import ManagedPreferencesUI
 
-/// Toolbar indicator for the status of the VirtualBuddyGuest app in a running virtual machine.
+/// Toolbar indicator for the status of the Hypervisaur Guest app in a running virtual machine.
 struct GuestAppStatusControl: View {
     var status: GuestAppConnectionStatus
 
@@ -76,12 +76,12 @@ private struct GuestAppStatusDetail: View {
     private static let installSteps = [
         "Open a Finder window in the virtual machine.",
         "Select the “Guest” disk in the Finder sidebar.",
-        "Double-click the VirtualBuddyGuest app icon."
+        "Double-click the Hypervisaur Guest app icon."
     ]
 
     @ViewBuilder
     private var installTutorial: some View {
-        Text("Install VirtualBuddyGuest")
+        Text("Install Hypervisaur Guest")
             .font(.subheadline.weight(.medium))
 
         VStack(alignment: .leading, spacing: 8) {
@@ -97,7 +97,7 @@ private struct GuestAppStatusDetail: View {
         }
 
         if status == .disconnected {
-            Text("If VirtualBuddyGuest is already installed, make sure it’s running in the virtual machine.")
+            Text("If Hypervisaur Guest is already installed, make sure it’s running in the virtual machine.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -107,21 +107,21 @@ private struct GuestAppStatusDetail: View {
 private extension GuestAppConnectionStatus {
     var title: String {
         switch self {
-        case .disabled: "VirtualBuddyGuest Is Disabled"
-        case .unknown: "VirtualBuddyGuest"
-        case .disconnected: "VirtualBuddyGuest Is Not Connected"
-        case .connected: "VirtualBuddyGuest Is Connected"
+        case .disabled: "Hypervisaur Guest Is Disabled"
+        case .unknown: "Hypervisaur Guest"
+        case .disconnected: "Hypervisaur Guest Is Not Connected"
+        case .connected: "Hypervisaur Guest Is Connected"
         }
     }
 
     var explanation: String {
         switch self {
         case .disabled:
-            "VirtualBuddyGuest is turned off for this virtual machine. To use it, shut down the virtual machine, then turn on “Enable VirtualBuddyGuest App” in the Guest App settings."
+            "Hypervisaur Guest is turned off for this virtual machine. To use it, shut down the virtual machine, then turn on “Enable Hypervisaur Guest App” in the Guest App settings."
         case .unknown:
-            "This virtual machine uses a legacy version of VirtualBuddyGuest. It mounts shared folders automatically, but can’t report its status to Hypervisaur."
+            "This virtual machine uses a legacy version of the guest app. It mounts shared folders automatically, but can’t report its status to Hypervisaur."
         case .disconnected:
-            "With VirtualBuddyGuest running in the virtual machine, shared folders are mounted automatically and the clipboard can be shared with your Mac."
+            "With Hypervisaur Guest running in the virtual machine, shared folders are mounted automatically and the clipboard can be shared with your Mac."
         case .connected:
             "Shared folders are mounted automatically and the clipboard can be shared between your Mac and the virtual machine."
         }
