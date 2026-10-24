@@ -246,10 +246,10 @@ struct SharedFoldersManagementView: View {
         run the following command in Terminal (Applications > Utilities > Terminal):
 
         ```
-        mkdir -p ~/Desktop/VirtualBuddyShared && mount -t virtiofs VirtualBuddyShared ~/Desktop/VirtualBuddyShared
+        mkdir -p ~/Desktop/"Hypervisaur Shared" && mount -t virtiofs VirtualBuddyShared ~/Desktop/"Hypervisaur Shared"
         ```
 
-        A folder named "VirtualBuddyShared" will show up on the Desktop.
+        A folder named "Hypervisaur Shared" will show up on the Desktop.
         """
 
         let rosettaVm = VBMacConfiguration.rosettaSupported && configuration.systemType == .linux

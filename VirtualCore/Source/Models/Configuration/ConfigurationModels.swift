@@ -597,13 +597,19 @@ public extension VBMacConfiguration {
 /// Configures a folder that's shared between the host and the guest.
 /// **Read the note at the top of this file before modifying this**
 public struct VBSharedFolder: Identifiable, Hashable, Codable {
-    /// The name the VirtualBuddy share will have in the guest OS.
-    ///
-    /// This is the name that must be used with the `mount` command, like so:
+    /// The tag of the shared folders device, which is the name that must be used with the `mount` command, like so:
     /// ```
-    /// mkdir -p ~/Desktop/VirtualBuddyShared && mount -t virtiofs VirtualBuddyShared ~/Desktop/VirtualBuddyShared
+    /// mkdir -p ~/Desktop/"Hypervisaur Shared" && mount -t virtiofs VirtualBuddyShared ~/Desktop/"Hypervisaur Shared"
     /// ```
+    /// It keeps VirtualBuddy's name because saved sessions can only resume with the same devices, and because VirtualBuddy's
+    /// legacy guest apps and existing `mount` commands use it.
     public static let virtualBuddyShareName = "VirtualBuddyShared"
+
+    /// The folder on the guest's desktop where the shared folders are mounted, which is the name the Finder shows for them.
+    public static let guestMountPointName = "Hypervisaur Shared"
+
+    /// Where earlier versions of the guest app mounted the shared folders.
+    public static let legacyGuestMountPointName = virtualBuddyShareName
 
     public static let rosettaShareName = "Rosetta"
 
