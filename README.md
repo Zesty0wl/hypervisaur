@@ -29,6 +29,7 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for ru
 - Screenshots and screen recordings of any virtual machine, with its sound
 - Clones that run alongside the original and only take up the space of what's changed
 - A shell in any running virtual machine, commands run from the Mac, and its logs as they're logged
+- Drag and drop of files and folders between the Mac and macOS, Windows and Linux virtual machines, with progress and speed
 - A library that shows which virtual machines are running, how much processor time and memory each one is using, and the space each one takes up on disk
 - Windows that open at the size of the virtual machine's display, and keep its shape as you resize them
 - Importing virtual machines from VirtualBuddy and UTM
@@ -119,7 +120,7 @@ While a virtual machine runs, the terminal button in its window's toolbar opens 
   <img src="./assets/Screenshots/Logs.png" width="720" alt="A Hypervisaur window following a macOS virtual machine's logs as they're logged">
 </p>
 
-They work through the Hypervisaur agent in the virtual machine, which talks to Hypervisaur over a channel of its own rather than the network:
+They work through the Hypervisaur agent in the virtual machine, which talks to Hypervisaur over a channel of its own rather than the network. The dinosaur in the window's toolbar shows whether the agent is connected; click it for what to do if it isn't.
 
 - **Windows**: Windows installs the agent from the DRIVERS drive when it starts. Commands run in PowerShell, as the system account, and the logs are the System and Application event logs.
 - **Linux**: install the agent once from the HYPERVISAUR disc, which Hypervisaur attaches until the agent has connected, by running `sudo mount -o ro /dev/disk/by-label/HYPERVISAUR /mnt && sudo sh /mnt/install.sh` in a terminal. It needs Python 3 and systemd. Commands run with `/bin/sh` as root, and the logs are the systemd journal.
@@ -135,6 +136,16 @@ hvctl logs "Ubuntu"                         # follows the logs until you press C
 ```
 
 Only your user account can reach a virtual machine's agent from the Mac.
+
+## Copying files
+
+Drag files and folders from the Finder or your desktop onto a running virtual machine's window to copy them to the desktop in the virtual machine. Drag files and folders out of a macOS or Windows virtual machine's window onto the Finder or your desktop to copy them to your Mac. A panel at the bottom of the window shows how far each copy has got, how fast it's going and how long it has left, and stops it if you need to.
+
+Copies go through the Hypervisaur agent, so they don't need the network or shared folders, and nothing appears in the virtual machine until it has all arrived.
+
+- **macOS**: the Hypervisaur Guest app needs to be running. It updates itself from the Guest disk when it starts.
+- **Windows**: Windows updates the agent from the DRIVERS drive when it starts, so restart a Windows virtual machine set up with an earlier version of Hypervisaur once.
+- **Linux**: you can drop files on a Linux virtual machine, and they go to the desktop of the user signed in at its display. Dragging files out of Linux isn't available, since Linux desktops don't let the agent see what's being dragged. Hypervisaur updates an agent installed from an earlier version by itself.
 
 ## Clones
 
