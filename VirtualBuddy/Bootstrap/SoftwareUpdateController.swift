@@ -7,107 +7,152 @@
 
 import SwiftUI
 import VirtualCore
+import BuddyFoundation
 import OSLog
 
-#if ENABLE_SPARKLE
-import Sparkle
-#endif
-
+/// Tells people when a newer release of Hypervisaur is on GitHub, and takes them to it to download.
+@MainActor
 final class SoftwareUpdateController: NSObject, ObservableObject {
 
     private let logger = Logger(subsystem: kShellAppSubsystem, category: "SoftwareUpdateController")
 
     static let shared = SoftwareUpdateController()
 
-    private var settings: VBSettings { VBSettingsContainer.current.settings }
+    private static let checkInterval = Duration.seconds(24 * 60 * 60)
 
-    @Published var automaticUpdatesEnabled = true {
+    /// Gives the app a moment to finish launching before the first check.
+    private static let launchDelay = Duration.seconds(10)
+
+    private enum Keys {
+        static let automaticallyChecks = "automaticallyChecksForUpdates"
+        static let lastCheckDate = "lastUpdateCheckDate"
+        static let skippedVersion = "skippedUpdateVersion"
+    }
+
+    private let defaults = UserDefaults.standard
+
+    @Published var automaticUpdatesEnabled: Bool {
         didSet {
-            #if ENABLE_SPARKLE
             guard automaticUpdatesEnabled != oldValue else { return }
-
-            logger.debug("Setting \(#function, privacy: .public) to \(self.automaticUpdatesEnabled, privacy: .public)")
-
-            updateController.updater.automaticallyChecksForUpdates = automaticUpdatesEnabled
-            #endif
+            defaults.set(automaticUpdatesEnabled, forKey: Keys.automaticallyChecks)
+            scheduleAutomaticChecks()
         }
     }
 
-    /// `nil` when the app is built without Sparkle, which hides the update settings.
     var automaticUpdatesBinding: Binding<Bool>? {
-        #if ENABLE_SPARKLE
         Binding { [self] in
             automaticUpdatesEnabled
         } set: { [self] newValue in
             automaticUpdatesEnabled = newValue
         }
-        #else
-        nil
-        #endif
     }
 
-    #if ENABLE_SPARKLE
-    private lazy var updateController: SPUStandardUpdaterController = {
-        SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: self,
-            userDriverDelegate: self
-        )
-    }()
-    #endif
+    private var automaticCheckTask: Task<Void, Never>?
+    private var isChecking = false
+
+    override init() {
+        defaults.register(defaults: [Keys.automaticallyChecks: true])
+        automaticUpdatesEnabled = defaults.bool(forKey: Keys.automaticallyChecks)
+        super.init()
+    }
 
     func activate() {
-        #if ENABLE_SPARKLE
-        logger.debug(#function)
-
-        updateController.startUpdater()
-        automaticUpdatesEnabled = updateController.updater.automaticallyChecksForUpdates
-        registerForUpdateChannelChanges()
-        #endif
+        scheduleAutomaticChecks()
     }
 
     @objc func checkForUpdates(_ sender: Any?) {
-        #if ENABLE_SPARKLE
-        logger.debug(#function)
-        
-        updateController.checkForUpdates(sender)
-        #else
+        Task { await check(userInitiated: true) }
+    }
+
+    private func scheduleAutomaticChecks() {
+        automaticCheckTask?.cancel()
+        automaticCheckTask = nil
+
+        guard automaticUpdatesEnabled else { return }
+
+        automaticCheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let delay = self?.delayUntilNextCheck else { return }
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                await self?.check(userInitiated: false)
+            }
+        }
+    }
+
+    /// Checks are a day apart, including across launches.
+    private var delayUntilNextCheck: Duration {
+        guard let lastCheck = defaults.object(forKey: Keys.lastCheckDate) as? Date else { return Self.launchDelay }
+        let remaining = Self.checkInterval - .seconds(Date.now.timeIntervalSince(lastCheck))
+        return max(remaining, Self.launchDelay)
+    }
+
+    private func check(userInitiated: Bool) async {
+        guard !isChecking else { return }
+        isChecking = true
+        defer { isChecking = false }
+
+        let currentVersion = Bundle.main.softwareVersion
+
+        do {
+            let release = try await AppRelease.latest()
+            defaults.set(Date.now, forKey: Keys.lastCheckDate)
+
+            logger.info("Newest release is \(release.version, privacy: .public), this is \(currentVersion, privacy: .public)")
+
+            if release.version > currentVersion {
+                guard userInitiated || defaults.string(forKey: Keys.skippedVersion) != release.version.description else { return }
+                presentAvailable(release, currentVersion: currentVersion, canSkip: !userInitiated)
+            } else if userInitiated {
+                presentUpToDate(currentVersion: currentVersion)
+            }
+        } catch {
+            logger.error("Update check failed: \(error, privacy: .public)")
+
+            /// Automatic checks fail quietly, such as when the Mac is offline, and try again the next day.
+            if userInitiated {
+                presentFailure(error)
+            }
+        }
+    }
+
+    private func presentAvailable(_ release: AppRelease, currentVersion: SoftwareVersion, canSkip: Bool) {
         let alert = NSAlert()
-        alert.messageText = "Updating Disabled"
-        alert.informativeText = "This build doesn't include Sparkle updates."
+        alert.messageText = "\(release.name) Is Available"
+        alert.informativeText = "You have Hypervisaur \(currentVersion). To update, download the installer from GitHub and open it. Your virtual machines stay as they are."
+        alert.addButton(withTitle: "View on GitHub")
+        alert.addButton(withTitle: "Not Now")
+        if canSkip {
+            alert.addButton(withTitle: "Skip This Version")
+        }
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            NSWorkspace.shared.open(release.pageURL)
+        case .alertThirdButtonReturn:
+            defaults.set(release.version.description, forKey: Keys.skippedVersion)
+        default:
+            break
+        }
+    }
+
+    private func presentUpToDate(currentVersion: SoftwareVersion) {
+        let alert = NSAlert()
+        alert.messageText = "Hypervisaur Is Up to Date"
+        alert.informativeText = "Hypervisaur \(currentVersion) is the newest version."
         alert.runModal()
-        #endif
     }
 
-    private func registerForUpdateChannelChanges() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleUpdateChannelChanged),
-            name: VBSettings.updateChannelDidChangeNotification,
-            object: nil
-        )
-    }
+    private func presentFailure(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Hypervisaur Couldn’t Check for Updates"
+        alert.informativeText = "\(error.localizedDescription) You can see the newest release on GitHub."
+        alert.addButton(withTitle: "View Releases")
+        alert.addButton(withTitle: "OK")
 
-    /// Check for updates when switching from release to beta channel.
-    @objc private func handleUpdateChannelChanged(_ note: Notification) {
-        guard let channel = note.object as? AppUpdateChannel else { return }
-        guard channel != .release else { return }
-
-        checkForUpdates(nil)
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(AppRelease.releasesPageURL)
+        }
     }
 
 }
-
-#if ENABLE_SPARKLE
-extension SoftwareUpdateController: SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
-
-    func feedURLString(for updater: SPUUpdater) -> String? {
-        settings.updateChannel.appCastURL.absoluteString
-    }
-
-    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
-        [settings.updateChannel.id]
-    }
-
-}
-#endif

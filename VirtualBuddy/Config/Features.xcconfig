@@ -1,5 +1,3 @@
-// ENABLE_SPARKLE = Enables building with Sparkle for automatic updates
 // ENABLE_USERDEFAULTS_SYNC = Enables the user defaults sync feature
-// Hypervisaur doesn't publish updates yet, so it's built without Sparkle, which would otherwise check VirtualBuddy's update feed.
 OTHER_SWIFT_FLAGS = $(inherited)
 

@@ -49,13 +49,11 @@ struct VirtualBuddyApp: App {
         }
         .windowToolbarStyle(.unified)
         .commands {
-            #if ENABLE_SPARKLE
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     updateController.checkForUpdates(nil)
                 }
             }
-            #endif
 
             CommandGroup(after: .newItem) {
                 Button("Import Virtual Machine…") {

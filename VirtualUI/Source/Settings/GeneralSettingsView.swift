@@ -49,10 +49,11 @@ struct GeneralSettingsView: View {
             if let enableAutomaticUpdates {
                 Section {
                     Toggle("Automatically check for updates", isOn: enableAutomaticUpdates)
-
-                    betaSection
                 } header: {
                     Text("App Updates")
+                } footer: {
+                    Text("Hypervisaur checks GitHub for a new release once a day, and tells you when there is one.")
+                        .settingsFooterStyle()
                 }
             }
         }
@@ -75,69 +76,6 @@ struct GeneralSettingsView: View {
 
             alert = .init()
         }
-    }
-
-    @ViewBuilder
-    private var betaSection: some View {
-        LabeledContent("Beta Updates") {
-            if settings.updateChannel == .beta {
-                Button("Disable") {
-                    confirmDisableBeta()
-                }
-            } else {
-                Button("Join Beta") {
-                    confirmJoinBeta()
-                }
-            }
-        }
-    }
-
-    private func confirmDisableBeta() {
-        if AppUpdateChannel.defaultChannel(for: .current) == .beta {
-            /// If beta is disabled while running a beta release, user needs to reinstall release build manually.
-            confirmDisableBetaNeedsReinstall()
-        } else {
-            /// If beta is disabled while running a non-beta release, no further action is needed.
-            settings.updateChannel = .release
-        }
-    }
-
-    /// Shown when user disables beta while running a beta release, which requires reinstalling a release version
-    /// in order to effectivelly get out of the beta train.
-    private func confirmDisableBetaNeedsReinstall() {
-        let alert = NSAlert()
-        alert.messageText = "Disable VirtualBuddy Beta"
-        alert.informativeText = "In order to go back to the release version of VirtualBuddy, please download the latest release from GitHub and replace the current version you have installed."
-        alert.addButton(withTitle: "Open Website")
-        alert.addButton(withTitle: "Cancel")
-
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-
-        settings.updateChannel = .release
-
-        guard let url = URL(string: "https://github.com/insidegui/VirtualBuddy/releases/latest") else { return }
-
-        NSWorkspace.shared.open(url)
-    }
-
-    private func confirmJoinBeta() {
-        let alert = NSAlert()
-        alert.messageText = "Join VirtualBuddy Beta"
-        alert.informativeText = """
-        Would like to join the beta and receive pre-release updates for testing?
-        
-        If you decide to stop receiving beta updates in the future, you will have to manually download and install the release version of VirtualBuddy.
-        """
-        alert.addButton(withTitle: "Join Beta")
-        alert.addButton(withTitle: "Cancel")
-
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-
-        settings.updateChannel = .beta
     }
 }
 
