@@ -9,6 +9,7 @@ import Cocoa
 import Foundation
 import Virtualization
 import Combine
+import VirtualWormhole
 import OSLog
 
 public struct VMSessionOptions: Hashable, Codable {
@@ -213,6 +214,9 @@ public final class VMController: ObservableObject {
 
     private var instance: (any VMEngineInstance)?
 
+    /// The connection to the Hypervisaur agent in the guest, while the virtual machine runs.
+    public var guestAgent: GuestAgentConnection? { instance?.guestAgentConnection }
+
     /// The instance when the virtual machine runs with Virtualization, which is the only engine that supports saved sessions.
     private var virtualizationInstance: VMInstance? { instance as? VMInstance }
 
@@ -245,6 +249,13 @@ public final class VMController: ObservableObject {
             .sink { [weak self] isConnected in
                 self?.isGuestAppConnected = isConnected
             }
+
+        guestAgentObservation = newInstance.guestAgentInfoPublisher
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] info in
+                self?.guestAgentInfo = info
+            }
     }
 
     private func runtime(of instance: any VMEngineInstance) throws -> VMRuntime {
@@ -271,6 +282,20 @@ public final class VMController: ObservableObject {
             isEnabled: model.configuration.guestAdditionsEnabled,
             isConnected: isGuestAppConnected
         )
+    }
+
+    // MARK: Guest Agent
+
+    private var guestAgentObservation: AnyCancellable?
+
+    /// What the Hypervisaur agent in the guest says about itself, or `nil` while it isn't connected.
+    @Published
+    public private(set) var guestAgentInfo: GuestAgentInfo?
+
+    /// The status of the Hypervisaur agent in a Windows or Linux guest. `nil` for macOS guests, whose agent is part of the guest app.
+    public var guestAgentStatus: GuestAgentStatus? {
+        guard virtualMachineModel.configuration.systemType != .mac else { return nil }
+        return GuestAgentStatus(info: guestAgentInfo)
     }
 
     // MARK: Saved Session State

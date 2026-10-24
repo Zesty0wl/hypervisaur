@@ -36,6 +36,8 @@ public final class QEMUVirtualMachine: ObservableObject {
     private var display: VNCClient?
     private var clipboardSync: QEMUClipboardSync?
     private var guestAgent: GuestAgentConnection?
+    var guestAgentConnection: GuestAgentConnection? { guestAgent }
+    let guestAgentInfo = GuestAgentInfoRelay()
     private var guestAgentServer: GuestAgentServer?
     private var runtimeDirectoryURL: URL?
     private var isStopExpected = false
@@ -272,6 +274,7 @@ public final class QEMUVirtualMachine: ObservableObject {
 
         guestAgent = connection
         guestAgentServer = server
+        guestAgentInfo.attach(connection)
         connection.start()
         server.start()
     }
@@ -428,6 +431,7 @@ public final class QEMUVirtualMachine: ObservableObject {
     }
 
     private func tearDown() async {
+        guestAgentInfo.detach()
         guestAgentServer?.close()
         guestAgentServer = nil
         guestAgent?.close()

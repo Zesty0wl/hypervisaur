@@ -44,6 +44,8 @@ public final class HostGuestSession {
 public final class GuestHostSession {
     private let engine: GuestSessionEngine
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// The agent is also served on a virtio socket, which the Mac prefers since it's much faster.
+    @ObservationIgnored private let agentSocket = GuestAgentSocketListener()
     public var isConnected: Bool { engine.isConnected }
     public init() {
         engine = GuestSessionEngine(connection: LiveGuestConnection(connection: .guest(port: GuestCommunication.port)), providers: .live)
@@ -52,11 +54,22 @@ public final class GuestHostSession {
     @discardableResult public func start() -> Task<Void, Never> {
         let task = engine.start()
         self.task = task
+        agentSocket.start()
         return task
     }
-    public func stop() async { await engine.stop(); task = nil }
+    public func stop() async { agentSocket.stop(); await engine.stop(); task = nil }
     deinit { task?.cancel() }
     public func sendDesktopPicture() async throws { try await engine.sendDesktopPicture() }
+
+    /// Finds out which files are being dragged in the guest, for dragging them out to the Mac. The guest app provides it,
+    /// since it needs a window.
+    public var dragCatcher: (@MainActor @Sendable () async -> [GuestDragItem])? {
+        get { engine.agentDragCatcher }
+        set {
+            engine.agentDragCatcher = newValue
+            agentSocket.dragCatcher = newValue
+        }
+    }
     public func importDomain(with id: String) async throws { try await engine.importDomain(id) }
 
     public func prepareForTermination() async {
@@ -112,6 +125,11 @@ final class GuestSessionEngine {
 
     /// The guest's agent, which runs programs for the Mac. The host doesn't have one.
     private var agentRunner: GuestAgentRunner?
+
+    var agentDragCatcher: GuestAgentFileTransfers.DragCatcher? {
+        get { agentRunner?.dragCatcher }
+        set { agentRunner?.dragCatcher = newValue }
+    }
 
     init(connection: any GuestConnection, hostClipboard: HostClipboardCoordinator? = nil, providers: GuestFeatureProviders, requestTimeout: Duration = .seconds(30)) {
         self.requestTimeout = requestTimeout

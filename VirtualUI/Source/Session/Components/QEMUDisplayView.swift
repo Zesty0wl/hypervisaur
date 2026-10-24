@@ -14,6 +14,8 @@ struct QEMUDisplayView: NSViewRepresentable {
     var onInputToggleHold: ((VMInputToggleHoldEvent) -> Void)? = nil
     /// Called when the guest's display changes resolution, and with its resolution once the first frame arrives.
     var onDisplaySizeChange: ((CGSize) -> Void)? = nil
+    /// Copies files dropped on the display to the guest, and files dragged out of it to the Mac.
+    var fileTransfers: GuestFileTransferCenter? = nil
 
     func makeNSView(context: Context) -> QEMUFramebufferView {
         QEMUFramebufferView(frame: .zero)
@@ -25,6 +27,7 @@ struct QEMUDisplayView: NSViewRepresentable {
         nsView.eventDeliveryMask = context.environment.virtualMachineEventDeliveryMask
         nsView.inputToggleHoldHandler = onInputToggleHold
         nsView.displaySizeHandler = onDisplaySizeChange
+        nsView.fileTransfers = fileTransfers
     }
 }
 
@@ -74,6 +77,28 @@ final class QEMUFramebufferView: NSView {
     }
 
     var displaySizeHandler: ((CGSize) -> Void)?
+
+    var fileTransfers: GuestFileTransferCenter? {
+        get { fileDragAndDrop.center }
+        set {
+            guard newValue !== fileDragAndDrop.center else { return }
+            fileDragAndDrop.center = newValue
+            if newValue != nil {
+                registerForDraggedTypes(GuestFileDragAndDrop.draggedTypes)
+            } else {
+                unregisterDraggedTypes()
+            }
+        }
+    }
+
+    private lazy var fileDragAndDrop = GuestFileDragAndDrop(view: self)
+
+    /// Files dropped on the display are copied to the guest.
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { fileDragAndDrop.draggingEntered(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { fileDragAndDrop.draggingUpdated(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { fileDragAndDrop.draggingExited(sender) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { fileDragAndDrop.draggingEnded(sender) }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { fileDragAndDrop.performDragOperation(sender) }
 
     private let inputToggleMonitor = VMInputToggleEventMonitor()
     private var frameObserver: UUID?
@@ -309,16 +334,25 @@ final class QEMUFramebufferView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) { sendPointer(for: event) }
-    override func mouseDragged(with event: NSEvent) { sendPointer(for: event) }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard eventDeliveryMask.allowsMouseEvents, !fileDragAndDrop.mouseDragged(with: event) else { return }
+        sendPointer(for: event)
+    }
+
     override func rightMouseDragged(with event: NSEvent) { sendPointer(for: event) }
     override func otherMouseDragged(with event: NSEvent) { sendPointer(for: event) }
 
     override func mouseDown(with event: NSEvent) {
         if eventDeliveryMask.allowsKeyboardEvents { window?.makeFirstResponder(self) }
+        if eventDeliveryMask.allowsMouseEvents { fileDragAndDrop.mouseDown(with: event) }
         updateButton(.left, isDown: true, event: event)
     }
 
-    override func mouseUp(with event: NSEvent) { updateButton(.left, isDown: false, event: event) }
+    override func mouseUp(with event: NSEvent) {
+        fileDragAndDrop.mouseUp(with: event)
+        updateButton(.left, isDown: false, event: event)
+    }
     override func rightMouseDown(with event: NSEvent) { updateButton(.right, isDown: true, event: event) }
     override func rightMouseUp(with event: NSEvent) { updateButton(.right, isDown: false, event: event) }
 
@@ -378,9 +412,13 @@ final class QEMUFramebufferView: NSView {
     }
 
     private func sendPointer(for event: NSEvent) {
+        sendPointer(at: convert(event.locationInWindow, from: nil))
+    }
+
+    /// Points outside the display are clamped to its edges by the VNC client.
+    private func sendPointer(at point: NSPoint) {
         guard eventDeliveryMask.allowsMouseEvents, let machine, framebufferSize.width > 0, framebufferSize.height > 0 else { return }
 
-        let point = convert(event.locationInWindow, from: nil)
         let rect = displayRect
 
         let normalizedX = (point.x - rect.minX) / rect.width
@@ -403,4 +441,19 @@ final class QEMUFramebufferView: NSView {
             machine.sendPointer(x: location.x, y: location.y, buttons: [])
         }
     }
+}
+
+// MARK: - Files
+
+extension QEMUFramebufferView: GuestPointerDriving {
+    func dragGuestPointer(to point: NSPoint) {
+        pressedButtons.insert(.left)
+        sendPointer(at: point)
+    }
+
+    func releaseGuestPointer(at point: NSPoint) {
+        pressedButtons.remove(.left)
+        sendPointer(at: point)
+    }
+
 }

@@ -187,7 +187,9 @@ public final class GuestAgentServer: @unchecked Sendable {
                         }
                     case .terminate:
                         channel?.terminate()
-                    case .reset, .hello, .output, .errorOutput, .exited, .failed:
+                    /// Programs on the Mac only run programs through the server. Files are copied by the app itself.
+                    case .reset, .hello, .output, .errorOutput, .exited, .failed, .putFiles, .fileHeader, .fileData, .filesEnd,
+                         .getFiles, .acknowledge, .catchDrag, .transferSize, .transferred, .dragItems:
                         break
                     }
                 }

@@ -1,4 +1,6 @@
 import Foundation
+import Combine
+import VirtualWormhole
 import OSLog
 
 /// Runs a virtual machine with QEMU on behalf of ``VMController``.
@@ -50,6 +52,7 @@ final class QEMUInstance: VMEngineInstance {
             self?.handleStop(error)
         }
         self.machine = machine
+        guestAgentInfoObservation = machine.guestAgentInfo.publisher.sink { [guestAgentInfo] in guestAgentInfo.send($0) }
 
         library.registerBootedVM(self)
 
@@ -152,6 +155,13 @@ final class QEMUInstance: VMEngineInstance {
 
     func stopGuestCommunication() async { }
 
+    var guestAgentConnection: GuestAgentConnection? { machine?.guestAgentConnection }
+
+    /// Each start makes a new machine, so what its agent says is passed on from whichever machine is running.
+    private let guestAgentInfo = CurrentValueSubject<GuestAgentInfo?, Never>(nil)
+    private var guestAgentInfoObservation: AnyCancellable?
+    var guestAgentInfoPublisher: AnyPublisher<GuestAgentInfo?, Never> { guestAgentInfo.eraseToAnyPublisher() }
+
     /// The installer stays attached until Windows has been installed, even if setup was interrupted, and is removed afterwards
     /// to free up the space it takes. It's created again from the original disc image if it's needed later.
     ///
@@ -190,6 +200,8 @@ final class QEMUInstance: VMEngineInstance {
         setupCompletionTask?.cancel()
         setupCompletionTask = nil
         machine = nil
+        guestAgentInfoObservation = nil
+        guestAgentInfo.send(nil)
         library.unregisterBootedVM(self)
         onVMStop(error)
     }

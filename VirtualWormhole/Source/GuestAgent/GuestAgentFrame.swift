@@ -20,8 +20,24 @@ public struct GuestAgentFrame: Equatable, Sendable {
         case inputEnd = 0x04
         /// Changes the size of the program's terminal, as two `UInt16`s: columns then rows.
         case resize = 0x05
-        /// Stops the program.
+        /// Stops the program, or cancels a transfer.
         case terminate = 0x06
+        /// Starts receiving files into the guest on a new channel. See ``GuestFileDestination``.
+        case putFiles = 0x07
+        /// Starts an item of a transfer, in either direction. See ``GuestFileHeader``.
+        case fileHeader = 0x08
+        /// The next bytes of the current file of a transfer, in either direction.
+        case fileData = 0x09
+        /// There are no more items in a transfer.
+        case filesEnd = 0x0A
+        /// Starts sending files from the guest on a new channel, with their paths in UTF-8, one per line.
+        case getFiles = 0x0B
+        /// How many bytes of file data the receiver of a transfer has written, as a `UInt64`.
+        case acknowledge = 0x0C
+        /// Asks the agent which files are being dragged in the guest, which it replies to with ``dragItems``.
+        case catchDrag = 0x0D
+        /// The size of a transfer, sent before its first item. See ``GuestTransferSize``.
+        case transferSize = 0x0E
 
         /// Sent by the agent on channel 0 when it starts and after ``reset``. See ``GuestAgentInfo``.
         case hello = 0x41
@@ -33,6 +49,10 @@ public struct GuestAgentFrame: Equatable, Sendable {
         case exited = 0x44
         /// The program couldn't be started, or stopped for a reason other than exiting, with a UTF-8 description.
         case failed = 0x45
+        /// Where the items of a ``putFiles`` transfer were put in the guest, as their paths in UTF-8, one per line.
+        case transferred = 0x46
+        /// The files being dragged in the guest. See ``GuestDragItem``.
+        case dragItems = 0x47
     }
 
     public var kind: Kind
@@ -52,6 +72,21 @@ public struct GuestAgentFrame: Equatable, Sendable {
 
     /// Output is sent in pieces no larger than this, so that one program can't hold up the others for long.
     public static let preferredChunkSize = 16 * 1024
+
+    /// File data is sent in pieces of this size.
+    public static let fileChunkSize = 256 * 1024
+
+    /// The most file data that a sender has waiting to be acknowledged.
+    public static let transferWindow: UInt64 = 4 << 20
+
+    /// Receivers acknowledge file data at least this often, and after the last file.
+    public static let acknowledgementInterval: UInt64 = 1 << 20
+
+    /// The first protocol version with file transfers and drags.
+    public static let fileTransferProtocolVersion: UInt32 = 2
+
+    /// The virtio socket port that agents in Linux and macOS guests listen on, which is much faster than their other links.
+    public static let socketPort: UInt32 = 51_781
 
     public func encoded() -> Data {
         var data = Data(capacity: Self.headerSize + payload.count)
@@ -202,6 +237,10 @@ extension Data {
 
     func littleEndianUInt16(at index: Index) -> UInt16 {
         UInt16(self[index]) | UInt16(self[index + 1]) << 8
+    }
+
+    func littleEndianUInt64(at index: Index) -> UInt64 {
+        (0..<8).reduce(UInt64(0)) { $0 | UInt64(self[index + $1]) << (8 * $1) }
     }
 }
 

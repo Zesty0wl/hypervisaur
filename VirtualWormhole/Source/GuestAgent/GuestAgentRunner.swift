@@ -8,7 +8,7 @@ import OSLog
 /// Programs run with the user's login shell, as the user the guest app runs as, in a session of their own so that stopping one
 /// also stops the programs it started, and with a pseudo terminal when they need one.
 final class GuestAgentRunner: @unchecked Sendable {
-    static let protocolVersion: UInt32 = 1
+    static let protocolVersion: UInt32 = 2
 
     /// Output is still read for this long after a program exits, since programs it started in the background can keep its output open.
     static let outputDrainTimeout: TimeInterval = 2
@@ -18,10 +18,18 @@ final class GuestAgentRunner: @unchecked Sendable {
     private let lock = NSLock()
     private var decoder = GuestAgentFrameDecoder()
     private var programs = [UInt32: Program]()
+    private let fileTransfers: GuestAgentFileTransfers
 
     /// - Parameter send: Sends encoded frames to the Mac, in order.
     init(send: @escaping @Sendable (Data) -> Void) {
         self.send = send
+        self.fileTransfers = GuestAgentFileTransfers { frame in send(frame.encoded()) }
+    }
+
+    /// Finds out which files are being dragged in the guest, for dragging them to the Mac.
+    var dragCatcher: GuestAgentFileTransfers.DragCatcher? {
+        get { fileTransfers.dragCatcher }
+        set { fileTransfers.dragCatcher = newValue }
     }
 
     /// Greets the Mac once the guest app is connected to it.
@@ -32,6 +40,7 @@ final class GuestAgentRunner: @unchecked Sendable {
     /// Stops everything, since its output can't reach the Mac any more.
     func disconnected() {
         terminateAll()
+        fileTransfers.cancelAll()
         lock.withLock { decoder = GuestAgentFrameDecoder() }
     }
 
@@ -51,9 +60,13 @@ final class GuestAgentRunner: @unchecked Sendable {
     }
 
     private func handle(_ frame: GuestAgentFrame) {
+        /// Transfers are handled separately, including cancelling one with `terminate`.
+        guard !fileTransfers.handle(frame) else { return }
+
         switch frame.kind {
         case .reset:
             terminateAll()
+            fileTransfers.cancelAll()
             sendHello()
         case .open:
             open(frame)
@@ -67,7 +80,8 @@ final class GuestAgentRunner: @unchecked Sendable {
             }
         case .terminate:
             program(frame.channel)?.terminate()
-        case .hello, .output, .errorOutput, .exited, .failed:
+        case .hello, .output, .errorOutput, .exited, .failed, .putFiles, .fileHeader, .fileData, .filesEnd, .getFiles,
+             .acknowledge, .catchDrag, .transferSize, .transferred, .dragItems:
             break
         }
     }

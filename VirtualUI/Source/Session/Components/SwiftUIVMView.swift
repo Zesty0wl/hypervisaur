@@ -54,6 +54,8 @@ struct SwiftUIVMView: NSViewControllerRepresentable {
     /// Called with the progress of the shortcuts that toggle input devices when held down.
     /// The shortcuts are only enabled when a handler is provided.
     var onInputToggleHold: ((VMInputToggleHoldEvent) -> Void)? = nil
+    /// Copies files dropped on the display to the guest, and files dragged out of it to the Mac.
+    var fileTransfers: GuestFileTransferCenter? = nil
 
     func makeNSViewController(context: Context) -> VMViewController {
         let controller = VMViewController()
@@ -71,6 +73,7 @@ struct SwiftUIVMView: NSViewControllerRepresentable {
         nsViewController.isDFUModeVM = isDFUModeVM
         nsViewController.eventDeliveryMask = context.environment.virtualMachineEventDeliveryMask
         nsViewController.inputToggleHoldHandler = onInputToggleHold
+        nsViewController.fileTransfers = fileTransfers
 
         if case .running(let runtime) = controllerState {
             nsViewController.virtualMachine = runtime.virtualMachine
@@ -134,6 +137,11 @@ final class VMViewController: NSViewController {
     var inputToggleHoldHandler: ((VMInputToggleHoldEvent) -> Void)? {
         get { vmView.inputToggleHoldHandler }
         set { vmView.inputToggleHoldHandler = newValue }
+    }
+
+    var fileTransfers: GuestFileTransferCenter? {
+        get { vmView.fileTransfers }
+        set { vmView.fileTransfers = newValue }
     }
 
     private lazy var vmView: VirtualBuddyVMView = {
@@ -309,6 +317,30 @@ final class VirtualBuddyVMView: VZVirtualMachineView {
 
     private let inputToggleMonitor = VMInputToggleEventMonitor()
 
+    // MARK: Files
+
+    var fileTransfers: GuestFileTransferCenter? {
+        get { fileDragAndDrop.center }
+        set {
+            guard newValue !== fileDragAndDrop.center else { return }
+            fileDragAndDrop.center = newValue
+            if newValue != nil {
+                registerForDraggedTypes(GuestFileDragAndDrop.draggedTypes)
+            } else {
+                unregisterDraggedTypes()
+            }
+        }
+    }
+
+    private lazy var fileDragAndDrop = GuestFileDragAndDrop(view: self)
+
+    /// Files dropped on the display are copied to the guest.
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { fileDragAndDrop.draggingEntered(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { fileDragAndDrop.draggingUpdated(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { fileDragAndDrop.draggingExited(sender) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { fileDragAndDrop.draggingEnded(sender) }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { fileDragAndDrop.performDragOperation(sender) }
+
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
 
@@ -345,11 +377,12 @@ final class VirtualBuddyVMView: VZVirtualMachineView {
 
     override func mouseDown(with event: NSEvent) {
         guard eventDeliveryMask.allowsMouseEvents else { return }
+        fileDragAndDrop.mouseDown(with: event)
         super.mouseDown(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard eventDeliveryMask.allowsMouseEvents else { return }
+        guard eventDeliveryMask.allowsMouseEvents, !fileDragAndDrop.mouseDragged(with: event) else { return }
         super.mouseDragged(with: event)
     }
 
@@ -369,6 +402,7 @@ final class VirtualBuddyVMView: VZVirtualMachineView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        fileDragAndDrop.mouseUp(with: event)
         guard eventDeliveryMask.allowsMouseEvents else { return }
         super.mouseUp(with: event)
     }
@@ -455,3 +489,32 @@ final class VirtualBuddyVMView: VZVirtualMachineView {
     )
 }
 #endif
+
+extension VirtualBuddyVMView: GuestPointerDriving {
+    /// Virtualization moves the guest's pointer from the view's mouse events, so the pointer is moved with events made for it.
+    func dragGuestPointer(to point: NSPoint) {
+        guard let event = guestPointerEvent(.leftMouseDragged, at: point) else { return }
+        super.mouseDragged(with: event)
+    }
+
+    func releaseGuestPointer(at point: NSPoint) {
+        guard let event = guestPointerEvent(.leftMouseUp, at: point) else { return }
+        super.mouseUp(with: event)
+    }
+
+    private func guestPointerEvent(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
+        guard let window else { return nil }
+        return NSEvent.mouseEvent(
+            with: type,
+            location: convert(point, to: nil),
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: type == .leftMouseUp ? 0 : 1
+        )
+    }
+
+}

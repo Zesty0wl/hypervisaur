@@ -55,6 +55,7 @@ final class GuestAppDelegate: NSObject, NSApplicationDelegate {
 
         launchAtLoginManager.autoEnableIfNeeded()
 
+        hostConnection.dragCatcher = { await GuestDragCatcher.catchDrag() }
         connectionTask = hostConnection.start()
 
         Task {

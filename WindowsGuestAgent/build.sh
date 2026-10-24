@@ -52,7 +52,8 @@ mkdir -p "$OUTPUT_DIR"
     -ffile-prefix-map="$AGENT_DIR=." \
     -static -s -Wl,--no-insert-timestamp \
     -o "$OUTPUT_DIR/HypervisaurAgent.exe" \
-    "$AGENT_DIR/agent.c"
+    "$AGENT_DIR/agent.c" \
+    -lole32 -lshell32 -luser32 -lwtsapi32 -luserenv
 
 echo "Built the agent in $OUTPUT_DIR"
 shasum -a 256 "$OUTPUT_DIR/HypervisaurAgent.exe"

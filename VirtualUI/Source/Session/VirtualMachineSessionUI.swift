@@ -49,6 +49,9 @@ public final class VirtualMachineSessionUI: ObservableObject {
     /// Whether a screenshot is being taken, which takes a moment for guests that are captured from their window.
     @Published var isTakingScreenshot = false
 
+    /// Copies files dropped on the window to the guest, and files dragged out of the guest to the Mac.
+    @MainActor private(set) lazy var fileTransfers = GuestFileTransferCenter(controller: controller)
+
     /// Sent with each screenshot or recording once it's saved.
     let capturedFileSaved = PassthroughSubject<URL, Never>()
 

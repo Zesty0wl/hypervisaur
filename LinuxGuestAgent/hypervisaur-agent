@@ -3,8 +3,10 @@
 The Hypervisaur agent for Linux, which runs programs in the virtual machine for the Mac.
 
 It runs as a systemd service, and talks to Hypervisaur over the virtio console port named hypervisaur.agent, using the frames
-that GuestAgentFrame.swift describes. Each program runs on a channel of its own, in a process group of its own so that stopping
-it also stops the programs it started, and with a pseudo terminal when it needs one.
+that Documentation/GuestAgentProtocol.md describes. It also listens on virtio socket port 51781, which is many times faster,
+and Hypervisaur uses that once it can connect to it. Each program runs on a channel of its own, in a process group of its own
+so that stopping it also stops the programs it started, and with a pseudo terminal when it needs one. Files the Mac sends are
+put on the desktop of the user signed in at the display.
 
 Usage: hypervisaur-agent [port]
 The port defaults to /dev/virtio-ports/hypervisaur.agent.
@@ -15,7 +17,11 @@ import os
 import platform
 import pty
 import pwd
+import re
+import shutil
 import signal
+import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -24,7 +30,10 @@ import threading
 import time
 
 PORT_PATH = "/dev/virtio-ports/hypervisaur.agent"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 3
+
+# The virtio socket port the agent also listens on, which is many times faster than the console port.
+SOCKET_PORT = 51781
 
 HEADER = struct.Struct("<IBI")
 MAX_PAYLOAD = 1 << 20
@@ -34,7 +43,14 @@ CHUNK_SIZE = 16 * 1024
 OUTPUT_DRAIN_TIMEOUT = 2
 
 RESET, OPEN, INPUT, INPUT_END, RESIZE, TERMINATE = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06
-HELLO, OUTPUT, ERROR_OUTPUT, EXITED, FAILED = 0x41, 0x42, 0x43, 0x44, 0x45
+PUT_FILES, FILE_HEADER, FILE_DATA, FILES_END, GET_FILES, ACKNOWLEDGE, CATCH_DRAG, TRANSFER_SIZE = range(0x07, 0x0F)
+HELLO, OUTPUT, ERROR_OUTPUT, EXITED, FAILED, TRANSFERRED, DRAG_ITEMS = range(0x41, 0x48)
+
+# File transfers: see Documentation/GuestAgentProtocol.md in Hypervisaur's repository.
+FILE_HEADER_FORMAT = struct.Struct("<BQIq")
+FILE_CHUNK_SIZE = 256 * 1024
+TRANSFER_WINDOW = 4 << 20
+ACKNOWLEDGEMENT_INTERVAL = 1 << 20
 
 
 def log(message):
@@ -43,6 +59,10 @@ def log(message):
 
 class Port:
     """The port, which frames are written to from any thread."""
+
+    # The console port reads nothing while Hypervisaur isn't connected, rather than ending.
+    ends_when_empty = False
+    read_size = 64 * 1024
 
     def __init__(self, path):
         self.path = path
@@ -66,7 +86,24 @@ class Port:
                 log(f"Couldn't send a frame of kind 0x{kind:02x} on channel {channel}: {error}")
 
     def read(self):
-        return os.read(self.fd, 64 * 1024)
+        return os.read(self.fd, self.read_size)
+
+
+class SocketPort(Port):
+    """A connection from Hypervisaur on the virtio socket, which ends when Hypervisaur disconnects."""
+
+    ends_when_empty = True
+    read_size = 1 << 20
+
+    def __init__(self, connection):
+        super().__init__(None)
+        self.connection = connection
+        self.fd = connection.fileno()
+
+    def close(self):
+        with self.lock:
+            self.fd = None
+        self.connection.close()
 
 
 class Session:
@@ -178,11 +215,314 @@ class Session:
                 stream.close()
 
 
+class TransferError(Exception):
+    pass
+
+
+def validated_components(path):
+    """The path's components, after checking that it stays inside the transfer."""
+    components = path.split("/")
+    if not path or path.startswith("/") or any(c in ("", ".", "..") or "\0" in c for c in components):
+        raise TransferError(f"A file in the transfer has a path that isn't allowed: \u201c{path}\u201d.")
+    return components
+
+
+def desktop_user():
+    """The user signed in at the display: the user of the active graphical session on seat0."""
+    try:
+        listing = subprocess.run(["loginctl", "list-sessions", "--no-legend"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    for line in listing.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        try:
+            output = subprocess.run(
+                ["loginctl", "show-session", fields[0], "-p", "Name", "-p", "Type", "-p", "Active", "-p", "Seat", "-p", "Class"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        properties = dict(entry.split("=", 1) for entry in output.splitlines() if "=" in entry)
+        if (properties.get("Seat") == "seat0" and properties.get("Active") == "yes" and properties.get("Class") == "user"
+                and properties.get("Type") in ("wayland", "x11", "mir")):
+            try:
+                return pwd.getpwnam(properties.get("Name", ""))
+            except KeyError:
+                continue
+    return None
+
+
+def desktop_folder(user):
+    """The user's desktop folder, as their XDG user directories name it, which is created if it doesn't exist."""
+    path = os.path.join(user.pw_dir, "Desktop")
+    try:
+        with open(os.path.join(user.pw_dir, ".config", "user-dirs.dirs")) as file:
+            for line in file:
+                match = re.match(r'\s*XDG_DESKTOP_DIR\s*=\s*"(.*)"\s*$', line)
+                if match:
+                    value = match.group(1).replace("$HOME", user.pw_dir)
+                    if value.startswith("/") and os.path.normpath(value) != os.path.normpath(user.pw_dir):
+                        path = value
+    except OSError:
+        pass
+
+    if not os.path.isdir(path):
+        os.makedirs(path, exist_ok=True)
+        os.chown(path, user.pw_uid, user.pw_gid)
+    return path
+
+
+def unique_path(folder, name):
+    """A name that isn't taken in the folder: the name itself, or Name (2).ext, Name (3).ext and so on."""
+    candidate = os.path.join(folder, name)
+    if not os.path.lexists(candidate):
+        return candidate
+    base, extension = os.path.splitext(name)
+    if not base:
+        base, extension = name, ""
+    number = 2
+    while True:
+        candidate = os.path.join(folder, f"{base} ({number}){extension}")
+        if not os.path.lexists(candidate):
+            return candidate
+        number += 1
+
+
+class IncomingTransfer:
+    """Files the Mac puts on the desktop. They're written into a hidden folder there first, so that nothing is seen half
+    written, then moved into place once they've all arrived. Frames are handled on the agent's thread, so writing to the
+    disk holds up reading from the port, which keeps the Mac from sending faster than the files are written."""
+
+    def __init__(self, agent, channel):
+        self.agent = agent
+        self.channel = channel
+        self.user = desktop_user()
+        if self.user is None:
+            raise TransferError("Nobody is signed in at the virtual machine's display.")
+
+        self.destination = desktop_folder(self.user)
+        self._remove_abandoned_staging()
+        self.staging = os.path.join(self.destination, f".hypervisaur-{channel}-{int(time.time() * 1000)}")
+        os.mkdir(self.staging, 0o700)
+        os.chown(self.staging, self.user.pw_uid, self.user.pw_gid)
+
+        self.folders = set()
+        self.files = set()
+        self.top_level = []
+        self.folder_times = []
+        self.current = None
+        self.written = 0
+        self.acknowledged = 0
+
+    def _remove_abandoned_staging(self):
+        """Removes hidden folders that copies left behind when the agent stopped during them, such as when it was updated.
+        A folder that changed in the last ten minutes may belong to a copy that's still going, so it's left alone."""
+        try:
+            names = os.listdir(self.destination)
+        except OSError:
+            return
+        for name in names:
+            if not name.startswith(".hypervisaur-"):
+                continue
+            path = os.path.join(self.destination, name)
+            try:
+                if os.path.isdir(path) and not os.path.islink(path) and time.time() - os.lstat(path).st_mtime > 600:
+                    shutil.rmtree(path, ignore_errors=True)
+            except OSError:
+                pass
+
+    def receive(self, kind, payload):
+        """Handles a frame of the transfer. Returns True once the transfer has finished."""
+        if kind == TRANSFER_SIZE:
+            return False
+        if kind == FILE_HEADER:
+            self._finish_file()
+            self._begin(payload)
+        elif kind == FILE_DATA:
+            if self.current is None or len(payload) > self.current["remaining"]:
+                raise TransferError("The transfer sent more of a file than it said the file had.")
+            self.current["file"].write(payload)
+            self.current["remaining"] -= len(payload)
+            self.written += len(payload)
+        elif kind == FILES_END:
+            self._finish_file()
+            for path, modified in reversed(self.folder_times):
+                os.utime(path, (modified, modified), follow_symlinks=False)
+            self._acknowledge(force=True)
+            paths = self._move_into_place()
+            self.agent.port.send(TRANSFERRED, self.channel, "\n".join(paths).encode())
+            return True
+        self._acknowledge(force=False)
+        return False
+
+    def _acknowledge(self, force):
+        due = self.written - self.acknowledged >= ACKNOWLEDGEMENT_INTERVAL or (self.current is None and self.written > self.acknowledged)
+        if force or due:
+            self.acknowledged = self.written
+            self.agent.port.send(ACKNOWLEDGE, self.channel, struct.pack("<Q", self.written))
+
+    def _begin(self, payload):
+        if len(payload) <= FILE_HEADER_FORMAT.size:
+            raise TransferError("A file's description is incomplete.")
+        item_type, size, permissions, modified = FILE_HEADER_FORMAT.unpack_from(payload)
+        path = payload[FILE_HEADER_FORMAT.size:].decode("utf-8", "replace")
+        components = validated_components(path)
+
+        parent = "/".join(components[:-1])
+        if parent and parent not in self.folders:
+            raise TransferError(f"\u201c{path}\u201d isn't inside a folder of the transfer.")
+        if path in self.folders or path in self.files:
+            raise TransferError(f"\u201c{path}\u201d is in the transfer twice.")
+
+        target = os.path.join(self.staging, *components)
+        mode = (permissions & 0o777) | 0o600 if permissions else None
+
+        if item_type == 1:
+            os.mkdir(target, mode if mode is not None else 0o755)
+            os.chown(target, self.user.pw_uid, self.user.pw_gid)
+            if mode is not None:
+                os.chmod(target, mode | 0o700)
+            self.folders.add(path)
+            if modified:
+                self.folder_times.append((target, modified))
+        elif item_type == 0:
+            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            os.fchown(descriptor, self.user.pw_uid, self.user.pw_gid)
+            self.files.add(path)
+            self.current = {"file": os.fdopen(descriptor, "wb"), "path": target, "remaining": size, "mode": mode, "modified": modified}
+            if size == 0:
+                self._finish_file()
+        else:
+            raise TransferError(f"A file has a type that isn't known ({item_type}).")
+
+        if len(components) == 1:
+            self.top_level.append(target)
+
+    def _finish_file(self):
+        if self.current is None:
+            return
+        current, self.current = self.current, None
+        current["file"].close()
+        if current["remaining"]:
+            raise TransferError("The transfer ended before all of a file arrived.")
+        os.chmod(current["path"], current["mode"] if current["mode"] is not None else 0o644)
+        if current["modified"]:
+            os.utime(current["path"], (current["modified"], current["modified"]), follow_symlinks=False)
+
+    def _move_into_place(self):
+        paths = []
+        for source in self.top_level:
+            target = unique_path(self.destination, os.path.basename(source))
+            os.rename(source, target)
+            paths.append(target)
+        self.cleanup()
+        return paths
+
+    def cleanup(self):
+        if self.current is not None:
+            self.current["file"].close()
+            self.current = None
+        shutil.rmtree(self.staging, ignore_errors=True)
+
+
+class OutgoingTransfer:
+    """Files the Mac copies from the guest, sent on a thread of their own, with no more than TRANSFER_WINDOW bytes waiting
+    to be acknowledged."""
+
+    def __init__(self, agent, channel, paths):
+        self.agent = agent
+        self.channel = channel
+        self.condition = threading.Condition()
+        self.sent = 0
+        self.acknowledged = 0
+        self.cancelled = False
+        self.items = []
+        self.total = 0
+        for path in paths:
+            self._add(os.path.realpath(path), os.path.basename(path.rstrip("/")))
+
+    def _add(self, path, relative):
+        info = os.lstat(path)
+        if stat.S_ISLNK(info.st_mode):
+            return
+        if stat.S_ISDIR(info.st_mode):
+            self.items.append((path, 1, 0, info, relative))
+            for name in sorted(os.listdir(path)):
+                self._add(os.path.join(path, name), f"{relative}/{name}")
+        elif stat.S_ISREG(info.st_mode):
+            self.items.append((path, 0, info.st_size, info, relative))
+            self.total += info.st_size
+
+    def acknowledge(self, count):
+        with self.condition:
+            self.acknowledged = max(self.acknowledged, count)
+            self.condition.notify_all()
+
+    def cancel(self):
+        with self.condition:
+            self.cancelled = True
+            self.condition.notify_all()
+
+    def run(self):
+        port, channel = self.agent.port, self.channel
+        try:
+            port.send(TRANSFER_SIZE, channel, struct.pack("<QI", self.total, len(self.items)))
+            for path, item_type, size, info, relative in self.items:
+                if self.cancelled:
+                    return
+                header = FILE_HEADER_FORMAT.pack(item_type, size, stat.S_IMODE(info.st_mode), int(info.st_mtime))
+                port.send(FILE_HEADER, channel, header + relative.encode())
+                if item_type != 0:
+                    continue
+                with open(path, "rb") as file:
+                    remaining = size
+                    while remaining > 0:
+                        length = min(remaining, FILE_CHUNK_SIZE)
+                        with self.condition:
+                            while not self.cancelled and self.sent + length - self.acknowledged > TRANSFER_WINDOW:
+                                self.condition.wait()
+                            if self.cancelled:
+                                return
+                        chunk = file.read(length)
+                        if not chunk:
+                            raise TransferError(f"\u201c{os.path.basename(path)}\u201d got shorter while it was being copied.")
+                        port.send(FILE_DATA, channel, chunk)
+                        remaining -= len(chunk)
+                        with self.condition:
+                            self.sent += len(chunk)
+            if not self.cancelled:
+                port.send(FILES_END, channel)
+        except (OSError, TransferError) as error:
+            log(f"Channel {channel}: sending files failed: {error}")
+            port.send(FAILED, channel, str(error).encode())
+        finally:
+            self.agent.remove_transfer(self)
+
+
 class Agent:
     def __init__(self, port):
         self.port = port
         self.sessions = {}
+        self.incoming = {}
+        self.outgoing = {}
         self.lock = threading.Lock()
+
+    def remove_transfer(self, transfer):
+        with self.lock:
+            if self.outgoing.get(transfer.channel) is transfer:
+                del self.outgoing[transfer.channel]
+
+    def cancel_transfers(self):
+        with self.lock:
+            incoming, outgoing = list(self.incoming.values()), list(self.outgoing.values())
+            self.incoming.clear()
+        for transfer in incoming:
+            transfer.cleanup()
+        for transfer in outgoing:
+            transfer.cancel()
 
     def remove(self, session):
         with self.lock:
@@ -213,7 +553,21 @@ class Agent:
         if kind == RESET:
             log("Hypervisaur connected")
             self.terminate_all()
+            self.cancel_transfers()
             self.hello()
+        elif kind == PUT_FILES:
+            self.start_incoming(channel)
+        elif kind in (TRANSFER_SIZE, FILE_HEADER, FILE_DATA, FILES_END):
+            self.receive_files(kind, channel, payload)
+        elif kind == GET_FILES:
+            self.start_outgoing(channel, payload)
+        elif kind == ACKNOWLEDGE and len(payload) >= 8:
+            with self.lock:
+                transfer = self.outgoing.get(channel)
+            if transfer:
+                transfer.acknowledge(struct.unpack_from("<Q", payload)[0])
+        elif kind == CATCH_DRAG:
+            self.port.send(FAILED, channel, "Dragging files out of Linux isn\u2019t supported.".encode())
         elif kind == OPEN:
             self.open(channel, payload)
         elif kind == INPUT:
@@ -229,9 +583,56 @@ class Agent:
             if session:
                 session.resize(*struct.unpack_from("<HH", payload))
         elif kind == TERMINATE:
-            session = self.session(channel)
-            if session:
-                session.terminate()
+            with self.lock:
+                incoming = self.incoming.pop(channel, None)
+                outgoing = self.outgoing.get(channel)
+            if incoming:
+                incoming.cleanup()
+                self.port.send(FAILED, channel, b"Cancelled.")
+            elif outgoing:
+                outgoing.cancel()
+            else:
+                session = self.session(channel)
+                if session:
+                    session.terminate()
+
+    def start_incoming(self, channel):
+        try:
+            transfer = IncomingTransfer(self, channel)
+        except (OSError, TransferError) as error:
+            log(f"Channel {channel}: couldn't receive files: {error}")
+            self.port.send(FAILED, channel, f"Couldn\u2019t receive the files: {error}".encode())
+            return
+        with self.lock:
+            self.incoming[channel] = transfer
+
+    def receive_files(self, kind, channel, payload):
+        with self.lock:
+            transfer = self.incoming.get(channel)
+        if transfer is None:
+            return
+        try:
+            finished = transfer.receive(kind, payload)
+        except (OSError, TransferError) as error:
+            log(f"Channel {channel}: receiving files failed: {error}")
+            transfer.cleanup()
+            finished = True
+            self.port.send(FAILED, channel, str(error).encode())
+        if finished:
+            with self.lock:
+                self.incoming.pop(channel, None)
+
+    def start_outgoing(self, channel, payload):
+        paths = [line for line in payload.decode("utf-8", "replace").split("\n") if line]
+        try:
+            transfer = OutgoingTransfer(self, channel, paths)
+        except OSError as error:
+            log(f"Channel {channel}: couldn't read the files to send: {error}")
+            self.port.send(FAILED, channel, f"Couldn\u2019t read the files: {error.strerror or error}.".encode())
+            return
+        with self.lock:
+            self.outgoing[channel] = transfer
+        threading.Thread(target=transfer.run, daemon=True).start()
 
     def open(self, channel, payload):
         if len(payload) < 5:
@@ -258,6 +659,8 @@ class Agent:
         while True:
             data = self.port.read()
             if not data:
+                if self.port.ends_when_empty:
+                    return
                 # Nothing is read while Hypervisaur isn't connected.
                 time.sleep(0.25)
                 continue
@@ -276,8 +679,45 @@ class Agent:
                 self.handle(kind, channel, payload)
 
 
+def serve_socket():
+    """Serves Hypervisaur on the virtio socket, one connection at a time, alongside the console port. Hypervisaur moves to
+    the socket when it can connect to it, and back to the console port when the connection ends."""
+    while True:
+        try:
+            listener = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind((socket.VMADDR_CID_ANY, SOCKET_PORT))
+            listener.listen(1)
+        except (OSError, AttributeError) as error:
+            log(f"Couldn't listen on virtio socket port {SOCKET_PORT} ({error}), trying again")
+            time.sleep(30)
+            continue
+
+        log(f"Listening on virtio socket port {SOCKET_PORT}")
+        while True:
+            try:
+                connection, _ = listener.accept()
+            except OSError as error:
+                log(f"The virtio socket stopped accepting connections ({error})")
+                break
+
+            port = SocketPort(connection)
+            agent = Agent(port)
+            log("Hypervisaur connected over the virtio socket")
+            try:
+                agent.run()
+            except OSError as error:
+                log(f"The virtio socket connection ended ({error})")
+            agent.terminate_all()
+            agent.cancel_transfers()
+            port.close()
+        listener.close()
+        time.sleep(1)
+
+
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else PORT_PATH
+    threading.Thread(target=serve_socket, daemon=True).start()
     last_error = None
 
     while True:
@@ -300,6 +740,7 @@ def main():
         except OSError as error:
             log(f"The port closed ({error}), opening it again")
         agent.terminate_all()
+        agent.cancel_transfers()
         with port.lock:
             os.close(port.fd)
             port.fd = None

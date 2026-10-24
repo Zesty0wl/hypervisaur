@@ -64,6 +64,11 @@ public final class VMInstance: NSObject, ObservableObject {
     /// The port for the Hypervisaur agent in the guest, and the connection to it while the virtual machine runs.
     private var guestAgentPort: GuestAgentConsolePort?
     private var guestAgent: GuestAgentConnection?
+    var guestAgentConnection: GuestAgentConnection? { guestAgent }
+    private let guestAgentInfo = GuestAgentInfoRelay()
+    private var agentTransport: VirtioSocketGuestAgentTransport?
+    private var agentSocketTask: Task<Void, Never>?
+    var guestAgentInfoPublisher: AnyPublisher<GuestAgentInfo?, Never> { guestAgentInfo.publisher }
     private var guestAgentServer: GuestAgentServer?
 
     /// Whether the guest app running in the virtual machine is currently connected to the host.
@@ -177,7 +182,8 @@ public final class VMInstance: NSObject, ObservableObject {
         }
         let c = VZVirtualMachineConfiguration()
 
-        if model.configuration.guestAdditionsEnabled, model.guestAppSupport == .full {
+        /// macOS guests use the socket for the guest app, and Linux guests for the Hypervisaur agent.
+        if model.configuration.systemType == .linux || (model.configuration.guestAdditionsEnabled && model.guestAppSupport == .full) {
             c.socketDevices = [VZVirtioSocketDeviceConfiguration()]
         }
         c.platform = platform
@@ -297,7 +303,8 @@ public final class VMInstance: NSObject, ObservableObject {
     }
 
     /// Lets programs on the Mac run programs in the guest through the Hypervisaur agent: over its own port in Linux guests,
-    /// and with the guest app's messages in macOS guests, whose agent is part of the guest app.
+    /// and with the guest app's messages in macOS guests, whose agent is part of the guest app. Agents in both also listen on
+    /// a virtio socket, which is used instead once it can be connected to, since it's much faster.
     private func startGuestAgent() {
         guard guestAgent == nil else { return }
 
@@ -306,16 +313,25 @@ public final class VMInstance: NSObject, ObservableObject {
         let unavailableMessage: @Sendable () -> String
 
         if let port = guestAgentPort {
-            connection = GuestAgentConnection(transport: GuestAgentStreamTransport(name: "GuestAgent", socket: port.socket), guestName: model.name)
-            connection.onInfoChange = { info in
-                guard info != nil else { return }
+            let transport = VirtioSocketGuestAgentTransport(fallback: GuestAgentStreamTransport(name: "GuestAgent console", socket: port.socket))
+            agentTransport = transport
+            connection = GuestAgentConnection(transport: transport, guestName: model.name)
+            let updateAttempt = LinuxGuestTools.UpdateAttempt()
+            connection.onInfoChange = { [weak connection] info in
+                guard let info else { return }
                 LinuxGuestTools.recordAgentConnected(in: model)
+                if let connection {
+                    LinuxGuestTools.updateAgentIfNeeded(info, over: connection, guestName: model.name, attempted: updateAttempt)
+                }
             }
             unavailableMessage = { LinuxGuestTools.unavailableMessage(for: model) }
         } else if let guestSession {
-            connection = GuestAgentConnection(transport: GuestAppAgentTransport(session: guestSession), guestName: model.name)
-            guestSession.onConnectionChange = { [weak connection] isConnected in
-                if !isConnected { connection?.agentDisconnected() }
+            let transport = VirtioSocketGuestAgentTransport(fallback: GuestAppAgentTransport(session: guestSession))
+            agentTransport = transport
+            connection = GuestAgentConnection(transport: transport, guestName: model.name)
+            /// The guest app's messages can reconnect while the agent's socket stays connected, which doesn't affect the agent then.
+            guestSession.onConnectionChange = { [weak connection, weak transport] isConnected in
+                if !isConnected, transport?.isUsingSocket != true { connection?.agentDisconnected() }
             }
             unavailableMessage = { "The Hypervisaur agent is part of the guest app, which isn’t running in “\(model.name)”. Install the guest app from the Guest disk, and keep it running." }
         } else {
@@ -332,16 +348,78 @@ public final class VMInstance: NSObject, ObservableObject {
 
             guestAgent = connection
             guestAgentServer = server
+            guestAgentInfo.attach(connection)
             connection.start()
             server.start()
+
+            if let agentTransport {
+                agentSocketTask = Task { [weak self] in
+                    await self?.connectAgentSocket(transport: agentTransport, connection: connection)
+                }
+            }
         } catch {
             logger.error("Failed to start the guest agent server: \(error, privacy: .public)")
             connection.close()
         }
     }
 
+    /// Agents that listen on a virtio socket are reached over it once it can be connected to, since their other links are far
+    /// too slow for copying files. It's tried every few seconds while the virtual machine runs, since the agent starts some
+    /// time after the virtual machine does, and older agents never listen on it.
+    private func connectAgentSocket(transport: VirtioSocketGuestAgentTransport, connection: GuestAgentConnection) async {
+        var failedAttempts = 0
+
+        while !Task.isCancelled {
+            if !transport.isUsingSocket, let device = _virtualMachine?.socketDevices.first as? VZVirtioSocketDevice {
+                do {
+                    let socket = try await Self.connect(to: device, port: GuestAgentFrame.socketPort)
+                    guard !Task.isCancelled else {
+                        socket.close()
+                        return
+                    }
+
+                    transport.use(socket) { [weak connection] in
+                        /// The agent is reached over its console port again until the socket can be connected to again.
+                        connection?.resetAgent()
+                    }
+                    connection.resetAgent()
+                    logger.notice("Connected to the guest agent's socket")
+                    failedAttempts = 0
+                } catch {
+                    failedAttempts += 1
+                }
+            }
+
+            try? await Task.sleep(for: failedAttempts < 30 ? .seconds(2) : .seconds(10))
+        }
+    }
+
+    private static func connect(to device: VZVirtioSocketDevice, port: UInt32) async throws -> UnixSocketConnection {
+        try await withCheckedThrowingContinuation { continuation in
+            device.connect(toPort: port) { result in
+                switch result {
+                case .success(let connection):
+                    /// The connection closes its descriptor when it goes away, so the socket gets a copy of its own.
+                    let descriptor = dup(connection.fileDescriptor)
+                    connection.close()
+                    if descriptor >= 0 {
+                        continuation.resume(returning: UnixSocketConnection(fileDescriptor: descriptor))
+                    } else {
+                        continuation.resume(throwing: POSIXError.current)
+                    }
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     /// The port can't be used again once it's closed, so the next configuration makes a new one.
     private func stopGuestAgent() {
+        agentSocketTask?.cancel()
+        agentSocketTask = nil
+        agentTransport = nil
+        guestAgentInfo.detach()
         guestAgentServer?.close()
         guestAgentServer = nil
         guestAgent?.close()

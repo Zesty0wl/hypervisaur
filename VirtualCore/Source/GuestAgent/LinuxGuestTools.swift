@@ -1,5 +1,7 @@
 import Foundation
 import CryptoKit
+import OSLog
+import VirtualWormhole
 
 /// The disc that the Hypervisaur agent for Linux is installed from, which is attached to Linux virtual machines until the agent
 /// has connected. See `LinuxGuestAgent` in the repository.
@@ -19,6 +21,91 @@ enum LinuxGuestTools {
         let url = model.metadataFileURL(connectedMarkerName)
         guard !FileManager.default.fileExists(atPath: url.path) else { return }
         FileManager.default.createFile(atPath: url.path, contents: nil)
+    }
+
+    /// The protocol version of the agent that comes with the app.
+    static var bundledAgentVersion: UInt32? {
+        guard let script = try? bundledAgentScript() else { return nil }
+        let text = String(decoding: script, as: UTF8.self)
+        guard let match = text.firstMatch(of: /(?m)^PROTOCOL_VERSION = (\d+)$/) else { return nil }
+        return UInt32(match.1)
+    }
+
+    private static func bundledAgentScript() throws -> Data {
+        guard let url = Bundle.virtualCore.url(forResource: resourceFolderName, withExtension: nil)?.appending(path: "hypervisaur-agent") else {
+            throw Failure("Hypervisaur doesn’t include the agent for Linux.")
+        }
+        return try Data(contentsOf: url)
+    }
+
+    /// A command that replaces the installed agent with the one that comes with the app, and restarts it a moment later,
+    /// once the command has finished, since restarting it stops what it's running.
+    static func agentUpdateCommand() throws -> String {
+        let encoded = try bundledAgentScript().base64EncodedString(options: .lineLength76Characters)
+        return """
+        set -e
+        target=/usr/local/sbin/hypervisaur-agent
+        temporary=$(mktemp "$target.XXXXXX")
+        trap 'rm -f "$temporary"' EXIT
+        base64 -d > "$temporary" <<'HYPERVISAUR_AGENT'
+        \(encoded)
+        HYPERVISAUR_AGENT
+        chmod 0755 "$temporary"
+        mv -f "$temporary" "$target"
+        trap - EXIT
+        systemd-run --quiet --collect --on-active=2 systemctl restart hypervisaur-agent.service
+        """
+    }
+
+    /// Updates an agent that's older than the one that comes with the app, through the agent itself, so that it doesn't
+    /// have to be installed again from the disc. It's only tried once for each connection, in case updating fails.
+    static func updateAgentIfNeeded(_ info: GuestAgentInfo, over connection: GuestAgentConnection, guestName: String, attempted: UpdateAttempt) {
+        guard let bundledVersion = bundledAgentVersion, info.protocolVersion < bundledVersion, attempted.begin() else { return }
+
+        /// The agent greets the Mac when it starts and again in reply to the Mac's `reset`, which stops whatever it's
+        /// running, so the update waits for that to settle rather than being stopped by it.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .seconds(3)) {
+            guard let current = connection.info, current.protocolVersion < bundledVersion else { return }
+            updateAgent(from: current.protocolVersion, to: bundledVersion, over: connection, guestName: guestName)
+        }
+    }
+
+    private static func updateAgent(from currentVersion: UInt32, to bundledVersion: UInt32, over connection: GuestAgentConnection, guestName: String) {
+        let logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "LinuxGuestTools")
+        logger.notice("Updating the agent in \(guestName, privacy: .public) from protocol \(currentVersion) to \(bundledVersion)")
+
+        do {
+            _ = try connection.open(GuestAgentOpenRequest(command: try agentUpdateCommand())) { event in
+                switch event {
+                case .exited(0):
+                    logger.notice("Updated the agent in \(guestName, privacy: .public); it restarts in a moment")
+                case .exited(let status):
+                    logger.error("Updating the agent in \(guestName, privacy: .public) failed with status \(status)")
+                case .failed(let message):
+                    logger.error("Updating the agent in \(guestName, privacy: .public) failed: \(message, privacy: .public)")
+                case .errorOutput(let data):
+                    logger.error("Updating the agent: \(String(decoding: data, as: UTF8.self), privacy: .public)")
+                case .output:
+                    break
+                }
+            }
+        } catch {
+            logger.error("Couldn't update the agent in \(guestName, privacy: .public): \(error, privacy: .public)")
+        }
+    }
+
+    /// Whether an update has been tried, shared by the callbacks of one connection.
+    final class UpdateAttempt: @unchecked Sendable {
+        private let lock = NSLock()
+        private var hasBegun = false
+
+        /// Returns `true` the first time only.
+        func begin() -> Bool {
+            lock.withLock {
+                defer { hasBegun = true }
+                return !hasBegun
+            }
+        }
     }
 
     static func unavailableMessage(for model: VBVirtualMachine) -> String {

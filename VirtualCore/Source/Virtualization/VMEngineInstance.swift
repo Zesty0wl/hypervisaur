@@ -1,4 +1,6 @@
 import Foundation
+import Combine
+import VirtualWormhole
 import Virtualization
 
 /// The object that's executing a virtual machine, which depends on the engine used for its guest type.
@@ -30,6 +32,12 @@ protocol VMEngineInstance: AnyObject {
 
     /// The runtime along with whether it's currently paused, or `nil` if nothing is running.
     var currentRuntime: (runtime: VMRuntime, isPaused: Bool)? { get }
+
+    /// The connection to the Hypervisaur agent in the guest, while the virtual machine runs.
+    var guestAgentConnection: GuestAgentConnection? { get }
+
+    /// What the agent in the guest says about itself, or `nil` while it isn't connected.
+    var guestAgentInfoPublisher: AnyPublisher<GuestAgentInfo?, Never> { get }
 
     var activeBridgeInterfaceIdentifiers: Set<String> { get }
     var hasBridgedNetworkAttachments: Bool { get }

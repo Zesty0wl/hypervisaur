@@ -113,6 +113,14 @@ public struct VirtualMachineSessionView: View {
                     if #available(macOS 26, *) {
                         ToolbarSpacer(.fixed)
                     }
+                } else if let guestAgentStatus = controller.guestAgentStatus {
+                    ToolbarItem(placement: .primaryAction) {
+                        GuestAgentStatusControl(status: guestAgentStatus, systemType: controller.virtualMachineModel.configuration.systemType)
+                    }
+
+                    if #available(macOS 26, *) {
+                        ToolbarSpacer(.fixed)
+                    }
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -184,10 +192,13 @@ public struct VirtualMachineSessionView: View {
                 }
             }
         case .running(let vm):
-            vmView(with: vm) { [weak ui] event in
+            vmView(with: vm, fileTransfers: ui.fileTransfers) { [weak ui] event in
                 ui?.handleInputToggleHold(event)
             }
             .background(VMDisplayViewReader(session: ui))
+            .overlay {
+                GuestFileTransferOverlays(center: ui.fileTransfers, guestName: controller.virtualMachineModel.name)
+            }
         case .paused(let vm):
             pausedView(with: vm) {
                 circularStartButton
@@ -212,7 +223,7 @@ public struct VirtualMachineSessionView: View {
     }
 
     @ViewBuilder
-    private func vmView(with runtime: VMRuntime, onInputToggleHold: ((VMInputToggleHoldEvent) -> Void)? = nil) -> some View {
+    private func vmView(with runtime: VMRuntime, fileTransfers: GuestFileTransferCenter? = nil, onInputToggleHold: ((VMInputToggleHoldEvent) -> Void)? = nil) -> some View {
         switch runtime {
         case .virtualization:
             SwiftUIVMView(
@@ -221,7 +232,8 @@ public struct VirtualMachineSessionView: View {
                 isDFUModeVM: controller.options.bootInDFUMode,
                 vmECID: controller.virtualMachineModel.ECID,
                 automaticallyReconfiguresDisplay: .constant(controller.virtualMachineModel.configuration.hardware.displayDevices.count > 0 ? controller.virtualMachineModel.configuration.hardware.displayDevices[0].automaticallyReconfiguresDisplay : false),
-                onInputToggleHold: onInputToggleHold
+                onInputToggleHold: onInputToggleHold,
+                fileTransfers: fileTransfers
             )
             .virtualMachineEventDeliveryMask(ui.eventDeliveryMask)
         case .qemu(let machine):
@@ -231,7 +243,8 @@ public struct VirtualMachineSessionView: View {
                 onInputToggleHold: onInputToggleHold,
                 onDisplaySizeChange: { [weak ui] size in
                     ui?.fixedGuestDisplaySizeChanged(size)
-                }
+                },
+                fileTransfers: fileTransfers
             )
             .virtualMachineEventDeliveryMask(ui.eventDeliveryMask)
         }
