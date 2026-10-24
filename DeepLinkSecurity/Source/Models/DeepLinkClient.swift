@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 /// Represents an app/process that's attempting to open a deep link in the app.
-public struct DeepLinkClient: Identifiable {
+public struct DeepLinkClient: Identifiable, Sendable {
     /// The client ID is a SHA256 hash of its designated CS requirement.
     public var id: String
     /// The bundle URL for the app or executable URL for the process.

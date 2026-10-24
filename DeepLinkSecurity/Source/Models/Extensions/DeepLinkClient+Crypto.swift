@@ -38,7 +38,20 @@ public extension DeepLinkClient {
 
     /// Validates the client's static code against the designated requirement,
     /// throwing an error if the signature doesn't match.
+    ///
+    /// Validating a bundle blocks while its nested code is validated on other threads, and when as many validations
+    /// as there are CPU cores block at once, none of them finish. Calling it from Swift concurrency's thread pool,
+    /// which has one thread per core, would hang every task in the process once enough requests arrive together,
+    /// so validations run one at a time on their own queue.
     func validate() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            codeValidationQueue.async {
+                continuation.resume(with: Result { try validateSynchronously() })
+            }
+        }
+    }
+
+    private func validateSynchronously() throws {
         var requirement: SecRequirement!
         try checkSecError(SecRequirementCreateWithString(designatedRequirement as CFString, .default, &requirement), task: "create client designated requirement")
 
@@ -52,6 +65,8 @@ public extension DeepLinkClient {
         }
     }
 }
+
+private let codeValidationQueue = DispatchQueue(label: "DeepLinkClient.CodeValidation", qos: .userInitiated)
 
 private func checkSecError(_ closure: @autoclosure () -> OSStatus, task: String) throws {
     let err = closure()
