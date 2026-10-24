@@ -5,14 +5,15 @@ import CryptoKit
 ///
 /// Windows doesn't include drivers for any of the network adapters that QEMU can emulate. Red Hat's virtio drivers are signed
 /// by Microsoft and available for ARM, and UTM publishes them on GitHub as part of its guest tools. Only the drivers for
-/// Windows 11 on ARM are kept, along with their license, and the SPICE agent that shares the clipboard.
+/// Windows 11 on ARM are kept, along with their license. The SPICE agent that shares the clipboard is kept with them, but it
+/// comes with the app, since it's built from source; see `WindowsSPICEAgent` in the repository.
 public enum WindowsDrivers {
     public static let version = "0.1.271"
 
     /// Identifies what's kept from the guest tools, so that the drivers are installed again when that changes.
-    static let contentsVersion = "\(version)-3"
+    static let contentsVersion = "\(version)-4"
 
-    /// The folder with the SPICE agent, which shares the clipboard with the Mac.
+    /// The folder with the SPICE agent, which shares the clipboard with the Mac, both in the app and with the drivers.
     static let clipboardAgentFolderName = "SPICEAgent"
     static let clipboardAgentFileNames = ["vdagent.exe", "vdservice.exe"]
 
@@ -50,8 +51,6 @@ public enum WindowsDrivers {
     ///
     /// - Parameter onProgress: Called with the fraction of the download that's complete.
     public static func install(onOutput: @escaping @Sendable (String) -> Void, onProgress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
-        _ = try sevenZipURL()
-
         onOutput("Downloading \(sourceURL.absoluteString)")
 
         let directoryURL = FileManager.default.temporaryDirectory.appending(path: "VirtualBuddyDrivers-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -122,8 +121,8 @@ public enum WindowsDrivers {
         let drivers = try extractDrivers(from: mountPoint, to: stagingURL)
         onOutput("Found ARM64 drivers: \(drivers.joined(separator: ", "))")
 
-        try await extractClipboardAgent(from: mountPoint, to: stagingURL)
-        onOutput("Found the SPICE agent for ARM64")
+        try copyClipboardAgent(to: stagingURL)
+        onOutput("Added the SPICE agent for ARM64")
 
         FileManager.default.createFile(atPath: stagingURL.appending(path: installedMarkerName).path, contents: Data(contentsVersion.utf8))
 
@@ -144,39 +143,24 @@ public enum WindowsDrivers {
         }
     }
 
-    /// Takes the SPICE agent for ARM from UTM's guest tools installer, which is an NSIS installer that 7-Zip can unpack.
-    /// The rest of the installer isn't used, since it also installs older drivers and services that Windows on ARM doesn't need.
-    static func extractClipboardAgent(from mountPoint: URL, to destinationURL: URL) async throws {
-        let installerName = try FileManager.default.contentsOfDirectory(atPath: mountPoint.path)
-            .first { $0.hasPrefix("utm-guest-tools") && $0.hasSuffix(".exe") }
-        guard let installerName else {
-            throw Failure("The Windows guest tools don’t include the installer with the clipboard agent.")
-        }
-
-        let agentURL = destinationURL.appending(path: clipboardAgentFolderName, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: agentURL, withIntermediateDirectories: true)
-
-        let installerURL = mountPoint.appending(path: installerName)
-        try await HostCommand.run(
-            try sevenZipURL(),
-            ["e", "-y", "-bso0", "-bsp0", "-o\(agentURL.path)", installerURL.path] + clipboardAgentFileNames.map { "ARM64/\($0)" }
-        )
-
-        for name in clipboardAgentFileNames where !FileManager.default.fileExists(atPath: agentURL.appending(path: name).path) {
-            throw Failure("The Windows guest tools don’t include \(name) for ARM.")
-        }
+    /// The SPICE agent for ARM that comes with the app.
+    ///
+    /// The agent in UTM's guest tools is built in a way that makes it stop whenever Windows releases the clipboard, which
+    /// happens each time something is copied there, and anything copied while it starts again isn't shared with the Mac.
+    static var bundledClipboardAgentURL: URL? {
+        Bundle.virtualCore.url(forResource: clipboardAgentFolderName, withExtension: nil)
     }
 
-    private static func sevenZipURL() throws -> URL {
-        guard let brew = Homebrew.current else {
-            throw Failure("Homebrew is needed to install 7-Zip, which unpacks the clipboard agent for Windows.")
+    static func copyClipboardAgent(from sourceURL: URL? = bundledClipboardAgentURL, to destinationURL: URL) throws {
+        guard let sourceURL else {
+            throw Failure("Hypervisaur doesn’t include the clipboard agent for Windows.")
         }
 
-        let url = QEMUToolchain(homebrew: brew).sevenZipURL
-        guard FileManager.default.isExecutableFile(atPath: url.path) else {
-            throw Failure("7-Zip is needed to unpack the clipboard agent for Windows. Install it with “brew install sevenzip”.")
+        for name in clipboardAgentFileNames where !FileManager.default.fileExists(atPath: sourceURL.appending(path: name).path) {
+            throw Failure("Hypervisaur doesn’t include \(name), which shares the clipboard with Windows.")
         }
-        return url
+
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL.appending(path: clipboardAgentFolderName, directoryHint: .isDirectory))
     }
 
     /// Where each driver is taken from in the guest tools, if not `w11/ARM64`.

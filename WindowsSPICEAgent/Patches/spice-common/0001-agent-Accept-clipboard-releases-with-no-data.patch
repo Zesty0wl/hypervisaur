@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Neil Johnson <189873278+Zesty0wl@users.noreply.github.com>
+Subject: [PATCH] agent: Accept clipboard releases with no data
+
+VDAgentClipboardRelease has no fields, so clients such as QEMU send
+releases without any data. Compilers that don't allow empty structures,
+such as MSVC, give it a size, so the agent rejected every release as the
+wrong size and stopped, and clipboard changes made in the guest while it
+restarted were lost.
+---
+ common/agent.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/common/agent.c b/common/agent.c
+index e7df786..3639106 100644
+--- a/common/agent.c
++++ b/common/agent.c
+@@ -54,7 +54,9 @@ static const int agent_message_min_size[] =
+     sizeof(VDAgentAnnounceCapabilities), /* VD_AGENT_ANNOUNCE_CAPABILITIES */
+     sizeof(VDAgentClipboardGrab), /* VD_AGENT_CLIPBOARD_GRAB */
+     sizeof(VDAgentClipboardRequest), /* VD_AGENT_CLIPBOARD_REQUEST */
+-    sizeof(VDAgentClipboardRelease), /* VD_AGENT_CLIPBOARD_RELEASE */
++    /* VDAgentClipboardRelease has no fields, but compilers that don't allow empty structures, such as MSVC,
++     * give it a size, which would make the agent reject every release that a client sends. */
++    0, /* VD_AGENT_CLIPBOARD_RELEASE */
+     sizeof(VDAgentFileXferStartMessage), /* VD_AGENT_FILE_XFER_START */
+     sizeof(VDAgentFileXferStatusMessage), /* VD_AGENT_FILE_XFER_STATUS */
+     sizeof(VDAgentFileXferDataMessage), /* VD_AGENT_FILE_XFER_DATA */

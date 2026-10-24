@@ -52,10 +52,9 @@ Choose Windows when creating a virtual machine. Hypervisaur first checks for wha
 | [QEMU](https://www.qemu.org) | Runs Windows with the Hypervisor framework, using the UEFI firmware that comes with it |
 | [swtpm](https://github.com/stefanberger/swtpm) | The TPM 2.0 that Windows 11 requires |
 | [wimlib](https://wimlib.net) | Copies the Windows installer onto a disk that the virtual machine can start from quickly |
-| [7-Zip](https://www.7-zip.org) | Unpacks the SPICE agent, which shares the clipboard, from UTM's guest tools |
-| Windows drivers | The virtio drivers for the network adapter, display and other devices, signed by Microsoft, and the SPICE agent. They're downloaded from [UTM's guest tools](https://github.com/utmapp/qemu/releases) and checked against a known checksum |
+| Windows drivers | The virtio drivers for the network adapter, display and other devices, signed by Microsoft. They're downloaded from [UTM's guest tools](https://github.com/utmapp/qemu/releases) and checked against a known checksum. The SPICE agent that shares the clipboard comes with Hypervisaur and is installed with them |
 
-QEMU, swtpm, wimlib and 7-Zip come from Homebrew, which you need to install yourself. Then choose the Windows disc image and give the virtual machine a name. With **Set Up Windows Automatically**, Windows installs without asking anything and signs in to a local account with the name and optional password you choose. Without it, you go through Windows Setup as usual.
+QEMU, swtpm and wimlib come from Homebrew, which you need to install yourself. Then choose the Windows disc image and give the virtual machine a name. With **Set Up Windows Automatically**, Windows installs without asking anything and signs in to a local account with the name and optional password you choose. Without it, you go through Windows Setup as usual.
 
 Installing takes about 10 minutes. Windows Setup uses a basic 800×600 display; afterwards, Windows uses the resolution in the virtual machine's display settings.
 
@@ -63,7 +62,7 @@ Installing takes about 10 minutes. Windows Setup uses a basic 800×600 display; 
 
 - You need your own Windows license. Windows is installed without a product key, so it isn't activated until you activate it.
 - Windows virtual machines use NAT networking, sound output and a fixed display resolution that you can change in the virtual machine's settings. Shared folders, USB devices and saved sessions aren't available for Windows yet.
-- Text you copy on your Mac can be pasted in Windows, and the other way round. You can turn this off with Share Clipboard in the virtual machine's settings. Windows virtual machines set up with Hypervisaur 0.1.0 need the clipboard agent installing once: in Windows, open the DRIVERS disk, then right-click `VirtIODrivers\Setup.cmd` and choose Run as Administrator. After that, Windows keeps what's installed from the DRIVERS disk up to date by itself.
+- Text you copy on your Mac can be pasted in Windows, and the other way round. You can turn this off with Share Clipboard in the virtual machine's settings. Windows virtual machines set up with Hypervisaur 0.1.0 need the clipboard agent installing once: in Windows, choose Restart from the Start menu, then open the DRIVERS disk, right-click `VirtIODrivers\Setup.cmd` and choose Run as Administrator. Restarting first matters, because shutting down with Fast Startup keeps Windows from seeing the updated DRIVERS disk. Setup turns Fast Startup off, and after that Windows keeps what's installed from the DRIVERS disk up to date by itself.
 - The firmware that comes with QEMU doesn't support Secure Boot, so Windows Setup is told to skip that check.
 
 ## Using Hypervisaur from a coding agent

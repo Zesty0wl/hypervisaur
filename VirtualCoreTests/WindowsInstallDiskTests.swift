@@ -67,18 +67,16 @@ struct WindowsInstallDiskTests {
         #expect(!FileManager.default.fileExists(atPath: destinationURL.appending(path: "qxl").path))
     }
 
-    @Test(.enabled(if: isSevenZipInstalled))
-    func driversAreInstalledFromGuestToolsDiscImage() async throws {
+    @Test func driversAreInstalledFromGuestToolsDiscImage() async throws {
         let directory = try makeTemporaryDirectory()
         let isoURL = try makeDiscImage(in: directory, files: [
             "Drivers/NetKVM/w11/ARM64/netkvm.inf": Data("netkvm".utf8),
             "Drivers/NetKVM/w11/ARM64/netkvmco.dll": Data("co".utf8),
             "Drivers/NetKVM/w11/amd64/netkvm.inf": Data("x64".utf8),
             "virtio-win_license.txt": Data("license".utf8),
-            "utm-guest-tools-0.1.271.exe": try makeGuestToolsInstaller(in: directory),
         ])
-        let destinationURL = directory.appending(path: "WindowsDrivers/0.1.271-3", directoryHint: .isDirectory)
-        let earlierVersionURL = directory.appending(path: "WindowsDrivers/0.1.271-2", directoryHint: .isDirectory)
+        let destinationURL = directory.appending(path: "WindowsDrivers/0.1.271-4", directoryHint: .isDirectory)
+        let earlierVersionURL = directory.appending(path: "WindowsDrivers/0.1.271-3", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: earlierVersionURL, withIntermediateDirectories: true)
 
         try await WindowsDrivers.install(fromGuestToolsImageAt: isoURL, to: destinationURL) { _ in }
@@ -87,17 +85,39 @@ struct WindowsInstallDiskTests {
         #expect(FileManager.default.fileExists(atPath: destinationURL.appending(path: "NetKVM/netkvmco.dll").path))
         #expect(FileManager.default.fileExists(atPath: destinationURL.appending(path: "virtio-win_license.txt").path))
         #expect(FileManager.default.fileExists(atPath: destinationURL.appending(path: ".installed").path))
-        #expect(try Data(contentsOf: destinationURL.appending(path: "SPICEAgent/vdagent.exe")) == Data("agent".utf8))
-        #expect(try Data(contentsOf: destinationURL.appending(path: "SPICEAgent/vdservice.exe")) == Data("service".utf8))
+        let bundledAgentURL = try #require(WindowsDrivers.bundledClipboardAgentURL)
+        for name in ["vdagent.exe", "vdservice.exe", "COPYING.txt", "SOURCES.txt"] {
+            let installed = try Data(contentsOf: destinationURL.appending(path: "SPICEAgent/\(name)"))
+            #expect(installed == (try Data(contentsOf: bundledAgentURL.appending(path: name))))
+        }
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: destinationURL.deletingLastPathComponent().path)
-        #expect(leftovers == ["0.1.271-3"])
+        #expect(leftovers == ["0.1.271-4"])
     }
 
-    @Test func guestToolsWithoutTheInstallerAreRejected() async throws {
-        let directory = try makeTemporaryDirectory()
+    /// Windows on ARM programs are PE files for the ARM64 machine type.
+    @Test(arguments: WindowsDrivers.clipboardAgentFileNames)
+    func bundledClipboardAgentIsForWindowsOnARM(name: String) throws {
+        let agentURL = try #require(WindowsDrivers.bundledClipboardAgentURL)
+        let data = try Data(contentsOf: agentURL.appending(path: name))
 
-        await #expect(throws: (any Error).self) {
-            try await WindowsDrivers.extractClipboardAgent(from: directory, to: directory)
+        #expect(data.prefix(2) == Data("MZ".utf8))
+        let headerOffset = Int(data[0x3C]) | Int(data[0x3D]) << 8 | Int(data[0x3E]) << 16 | Int(data[0x3F]) << 24
+        #expect(data[headerOffset..<(headerOffset + 4)] == Data("PE\0\0".utf8))
+        let machine = Int(data[headerOffset + 4]) | Int(data[headerOffset + 5]) << 8
+        #expect(machine == 0xAA64)
+    }
+
+    @Test func incompleteClipboardAgentIsRejected() throws {
+        let directory = try makeTemporaryDirectory()
+        let agentURL = directory.appending(path: "agent", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: agentURL, withIntermediateDirectories: true)
+        try Data("agent".utf8).write(to: agentURL.appending(path: "vdagent.exe"))
+
+        #expect(throws: (any Error).self) {
+            try WindowsDrivers.copyClipboardAgent(from: agentURL, to: directory)
+        }
+        #expect(throws: (any Error).self) {
+            try WindowsDrivers.copyClipboardAgent(from: nil, to: directory)
         }
     }
 
@@ -149,7 +169,7 @@ struct WindowsInstallDiskTests {
 
     @Test func setupScriptInstallsTheClipboardAgentService() {
         let script = WindowsDriversDisk.setupScript
-        #expect(script.contains("copy /y \"%~dp0SPICEAgent\\*.exe\" \"%AgentFolder%\""))
+        #expect(script.contains("copy /y \"%~dp0SPICEAgent\\*.*\" \"%AgentFolder%\""))
         #expect(script.contains("\"%AgentFolder%\\vdservice.exe\" install"))
         #expect(script.contains("net start vdservice"))
         #expect(script.contains("copy /y \"%~dp0Setup.version\" \"%ProgramData%\\Hypervisaur\\Setup.version\""))
@@ -166,6 +186,12 @@ struct WindowsInstallDiskTests {
         #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Started\" /sc onstart /ru SYSTEM /tr \"%StatusScript% startup\""))
         #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Signed In\" /sc onlogon /ru SYSTEM /tr \"%StatusScript%\""))
         #expect(!script.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
+    }
+
+    /// Windows only sees a replaced drivers disk if it starts afresh, rather than resuming with Fast Startup.
+    @Test func setupScriptTurnsOffFastStartup() {
+        let script = WindowsDriversDisk.setupScript
+        #expect(script.contains("reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power\" /v HiberbootEnabled /t REG_DWORD /d 0 /f"))
     }
 
     @Test func statusScriptReportsStartupAndSignInAfterSetup() {
@@ -186,24 +212,6 @@ struct WindowsInstallDiskTests {
 
     private func sha256(of fileURL: URL) throws -> String {
         SHA256.hash(data: try Data(contentsOf: fileURL)).map { String(format: "%02x", $0) }.joined()
-    }
-
-    private static var isSevenZipInstalled: Bool {
-        guard let brew = Homebrew.current else { return false }
-        return FileManager.default.isExecutableFile(atPath: QEMUToolchain(homebrew: brew).sevenZipURL.path)
-    }
-
-    /// The SPICE agent is unpacked from the guest tools installer with 7-Zip, which reads a zip archive just as well.
-    private func makeGuestToolsInstaller(in directory: URL) throws -> Data {
-        let agentURL = directory.appending(path: "installer/ARM64", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: agentURL, withIntermediateDirectories: true)
-        try Data("agent".utf8).write(to: agentURL.appending(path: "vdagent.exe"))
-        try Data("service".utf8).write(to: agentURL.appending(path: "vdservice.exe"))
-        try Data("x64".utf8).write(to: directory.appending(path: "installer/vdagent.exe"))
-
-        let archiveURL = directory.appending(path: "installer.zip")
-        try runTool("/usr/bin/ditto", ["-c", "-k", "--keepParent", agentURL.path, archiveURL.path])
-        return try Data(contentsOf: archiveURL)
     }
 
     private func makeTemporaryDirectory() throws -> URL {

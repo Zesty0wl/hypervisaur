@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Neil Johnson <189873278+Zesty0wl@users.noreply.github.com>
+Subject: [PATCH] Build with recent llvm-mingw toolchains
+
+The stdint.h in the common folder hides MinGW's own, since that folder is
+in the include path, and it defines wint_t in a way that stops MinGW's
+headers from defining wctype_t. MinGW builds now use MinGW's stdint.h.
+
+display_configuration.cpp uses std::nothrow, which recent versions of
+libc++ no longer declare in the headers it includes, so it includes <new>.
+---
+ common/stdint.h                   | 5 ++++-
+ vdagent/display_configuration.cpp | 1 +
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/common/stdint.h b/common/stdint.h
+index 411f5bf..d4b6f3e 100644
+--- a/common/stdint.h
++++ b/common/stdint.h
+@@ -36,7 +36,10 @@
+ 
+ 
+ 
+-#ifndef _STDINT_H
++/* MinGW has its own stdint.h, which this one would otherwise hide, since this folder is in the include path. */
++#if defined(__MINGW32__)
++#include_next <stdint.h>
++#elif !defined(_STDINT_H)
+ 
+ #define _STDINT_H
+ 
+diff --git a/vdagent/display_configuration.cpp b/vdagent/display_configuration.cpp
+index fc308ce..6c5b9cf 100644
+--- a/vdagent/display_configuration.cpp
++++ b/vdagent/display_configuration.cpp
+@@ -16,6 +16,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
+ #include "display_configuration.h"
++#include <new>
+ #include <winternl.h>
+ #include <spice/macros.h>
+ 

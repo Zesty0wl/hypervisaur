@@ -13,27 +13,33 @@ enum WindowsDriversDisk {
     static let setupVersionFileName = "Setup.version"
 
     /// Changes whenever the scripts on the disk change, so that disks with older scripts are created again.
-    private static let layoutVersion = 5
+    private static let layoutVersion = 6
 
     static var contentsVersion: String { "\(WindowsDrivers.contentsVersion)/\(layoutVersion)" }
 
     /// Installs the drivers, the SPICE agent that shares the clipboard, and tasks that tell Hypervisaur when Windows has started
     /// and when someone has signed in. Running it in a virtual machine that was set up without it is how they're installed later.
     ///
-    /// The SPICE agent's service starts the agent in each session that's signed in. It's stopped while it's replaced.
-    /// The tasks run as the system account, so that no window appears when they run.
+    /// The SPICE agent's service starts the agent in each session that's signed in. It's stopped while it's replaced, and its
+    /// licenses and sources are installed with it. The tasks run as the system account, so that no window appears when they run.
+    ///
+    /// Fast Startup is turned off, because Hypervisaur replaces this disk while Windows is shut down. With Fast Startup, Windows
+    /// resumes with the disk as it was when it shut down, so it doesn't see what's changed, and can write its old view of the
+    /// disk over the new one.
     static let setupScript = """
     @echo off
     rem Installs the VirtIO drivers and the clipboard agent for Windows virtual machines in Hypervisaur.
 
     pnputil /add-driver "%~dp0*.inf" /subdirs /install
 
+    reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f >nul
+
     set "AgentFolder=%ProgramFiles%\\Hypervisaur\\SPICE Agent"
     if exist "%~dp0\(WindowsDrivers.clipboardAgentFolderName)\\vdservice.exe" (
         net stop vdservice >nul 2>&1
         taskkill /f /im vdagent.exe >nul 2>&1
         mkdir "%AgentFolder%" 2>nul
-        copy /y "%~dp0\(WindowsDrivers.clipboardAgentFolderName)\\*.exe" "%AgentFolder%" >nul
+        copy /y "%~dp0\(WindowsDrivers.clipboardAgentFolderName)\\*.*" "%AgentFolder%" >nul
         "%AgentFolder%\\vdservice.exe" install >nul 2>&1
         sc config vdservice start= auto >nul
         net start vdservice >nul 2>&1

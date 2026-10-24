@@ -8,7 +8,6 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
     case qemu
     case swtpm
     case wimlib
-    case sevenZip
     case windowsDrivers
 
     public var id: RawValue { rawValue }
@@ -19,7 +18,6 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "QEMU"
         case .swtpm: "swtpm"
         case .wimlib: "wimlib"
-        case .sevenZip: "7-Zip"
         case .windowsDrivers: "Windows Drivers"
         }
     }
@@ -30,8 +28,7 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "Runs Windows using the Hypervisor framework, with UEFI firmware for ARM."
         case .swtpm: "Software TPM 2.0, required by Windows 11."
         case .wimlib: "Prepares the Windows installer so the virtual machine can read it quickly."
-        case .sevenZip: "Unpacks the clipboard agent for Windows from UTM’s guest tools."
-        case .windowsDrivers: "Network and other virtio drivers for Windows, signed by Microsoft, and the SPICE agent that shares the clipboard. Downloaded from UTM’s guest tools on GitHub."
+        case .windowsDrivers: "Network and other virtio drivers for Windows, signed by Microsoft, downloaded from UTM’s guest tools on GitHub, and the SPICE agent that shares the clipboard."
         }
     }
 
@@ -41,7 +38,6 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "cpu"
         case .swtpm: "lock.shield"
         case .wimlib: "doc.zipper"
-        case .sevenZip: "archivebox"
         case .windowsDrivers: "network"
         }
     }
@@ -53,7 +49,6 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "qemu"
         case .swtpm: "swtpm"
         case .wimlib: "wimlib"
-        case .sevenZip: "sevenzip"
         }
     }
 }
@@ -222,8 +217,6 @@ public final class WindowsHostDependencies: ObservableObject {
             return FileManager.default.isExecutableFile(atPath: toolchain.swtpmURL.path)
         case .wimlib:
             return FileManager.default.isExecutableFile(atPath: toolchain.wimlibURL.path)
-        case .sevenZip:
-            return FileManager.default.isExecutableFile(atPath: toolchain.sevenZipURL.path)
         case .windowsDrivers:
             return WindowsDrivers.isInstalled
         }
@@ -235,7 +228,6 @@ public struct QEMUToolchain: Sendable {
     public let qemuURL: URL
     public let swtpmURL: URL
     public let wimlibURL: URL
-    public let sevenZipURL: URL
     public let firmwareCodeURL: URL
     public let firmwareVariablesTemplateURL: URL
 
@@ -243,7 +235,6 @@ public struct QEMUToolchain: Sendable {
         qemuURL = homebrew.binaryURL(named: "qemu-system-aarch64")
         swtpmURL = homebrew.binaryURL(named: "swtpm")
         wimlibURL = homebrew.binaryURL(named: "wimlib-imagex")
-        sevenZipURL = homebrew.binaryURL(named: "7zz")
         firmwareCodeURL = homebrew.sharedResourceURL("qemu/edk2-aarch64-code.fd")
         firmwareVariablesTemplateURL = homebrew.sharedResourceURL("qemu/edk2-arm-vars.fd")
     }

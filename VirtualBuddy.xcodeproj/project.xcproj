@@ -350,6 +350,22 @@
           },
         },
       ],
+    }, {
+      "kind": "folder",
+      "path": "WindowsSPICEAgent",
+      "membership-exceptions": [
+        {
+          "build-phase": "VirtualCore/copy/Copy Windows SPICE Agent",
+          "inclusions": [
+            "ARM64/COPYING.txt",
+            "ARM64/SOURCES.txt",
+            "ARM64/libpng-LICENSE.txt",
+            "ARM64/vdagent.exe",
+            "ARM64/vdservice.exe",
+            "ARM64/zlib-LICENSE.txt",
+          ],
+        },
+      ],
     },
   ],
   "targets": [
@@ -628,6 +644,11 @@
           "name": "Copy Software Catalog Feeds",
           "bundle-base-path": "resources-directory",
           "relative-path": "SoftwareCatalog",
+        }, {
+          "kind": "copy",
+          "name": "Copy Windows SPICE Agent",
+          "bundle-base-path": "resources-directory",
+          "relative-path": "SPICEAgent",
         }, {
           "kind": "copy",
           "name": "Copy Preview Library",
