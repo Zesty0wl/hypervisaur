@@ -798,10 +798,39 @@ public final class VMController: ObservableObject {
         try Task.checkCancellation()
     }
     
+    /// Whether the virtual machine is running or on its way to running, which is when it can be forced to stop.
+    public var canForceStop: Bool {
+        switch state {
+        case .starting, .resizingDisk, .running, .paused, .saving, .restoring: true
+        case .idle, .stopped, .saved, .recoveryRequired: false
+        }
+    }
+
+    /// How long the virtualization engine gets to stop the virtual machine before its process is ended instead.
+    private static let forceStopTimeout = Duration.seconds(10)
+
     /// Terminates the virtual machine immediately. The guest doesn't get a chance to shut down, which can lose data.
+    ///
+    /// A virtual machine that's stuck may not stop when asked, or something else may be holding it up, such as a start
+    /// that never finishes. Its process is ended then, as `kill -9` would, which the engine reports as the virtual
+    /// machine stopping.
     public func forceStop() async throws {
+        guard !lease.isBusy else {
+            logger.warning("Force stop while another operation is in progress, ending the virtual machine's process")
+            try endVirtualMachineProcess()
+            return
+        }
+
         try await lease.perform {
             guard instance != nil else { return }
+
+            let fallback = Task { [weak self] in
+                try await Task.sleep(for: Self.forceStopTimeout)
+                guard let self else { return }
+                self.logger.warning("The virtual machine didn't stop in time, ending its process")
+                try? self.endVirtualMachineProcess()
+            }
+            defer { fallback.cancel() }
 
             do {
                 let instance = try ensureInstance()
@@ -818,6 +847,18 @@ public final class VMController: ObservableObject {
         }
 
         unhideCursor()
+    }
+
+    /// Ends the process that runs the virtual machine, found by the files it has open in the virtual machine's bundle.
+    private func endVirtualMachineProcess() throws {
+        let bundleURL = virtualMachineModel.bundleURL
+        guard let pid = VMProcessInspector.process(forBundleAt: bundleURL, among: VMProcessInspector.candidateProcesses()) else {
+            throw Failure("Couldn’t find the process that runs “\(virtualMachineModel.name)”.")
+        }
+        guard kill(pid, SIGKILL) == 0 else {
+            throw Failure("Couldn’t end the process that runs “\(virtualMachineModel.name)”: \(String(cString: strerror(errno))).")
+        }
+        logger.notice("Ended process \(pid) that ran the virtual machine")
     }
 
     /// Runs work that nothing else may do anything to the virtual machine during. Operations requested in the meantime wait their turn.

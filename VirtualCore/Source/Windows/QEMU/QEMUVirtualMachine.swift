@@ -428,6 +428,16 @@ public final class QEMUVirtualMachine: ObservableObject {
             logger.warning("QEMU didn't exit in time, terminating it")
             process.terminate()
         }
+
+        /// QEMU can be stuck badly enough to ignore being asked to terminate, so it's then ended outright.
+        let killDeadline = clock.now.advanced(by: .seconds(2))
+        while process.isRunning, clock.now < killDeadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        if process.isRunning {
+            logger.warning("QEMU didn't terminate, ending it")
+            kill(process.processIdentifier, SIGKILL)
+        }
     }
 
     private func tearDown() async {

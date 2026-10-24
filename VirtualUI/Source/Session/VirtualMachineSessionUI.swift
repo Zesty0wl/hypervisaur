@@ -386,6 +386,15 @@ private struct VirtualMachineGuestActions: View {
                 .disabled(actionTask != nil || controller?.state.canSaveAndClose != true)
             }
 
+            /// Available even while another action is in progress, since a stuck one is when it's needed.
+            Button {
+                Task { await session?.forceStopAfterConfirmation() }
+            } label: {
+                Label("Force Stop…", systemImage: "stop.circle.fill")
+            }
+            .keyboardShortcut(".", modifiers: [.command, .option])
+            .disabled(controller?.canForceStop != true)
+
             Divider()
 
             Button {
@@ -426,15 +435,14 @@ private struct VirtualMachineGuestActions: View {
         .disabled(actionTask != nil)
     }
 
+    /// Available even while another action is in progress, since a stuck one is when it's needed.
     private var forceStopButton: some View {
         Button {
-            runGuestAction {
-                await session?.forceStopAfterConfirmation()
-            }
+            Task { await session?.forceStopAfterConfirmation() }
         } label: {
             Label("Force Stop…", systemImage: "stop.circle.fill")
         }
-        .disabled(actionTask != nil)
+        .disabled(controller?.canForceStop != true)
     }
 
     private func runGuestAction(_ action: @escaping @MainActor () async throws -> Void) {

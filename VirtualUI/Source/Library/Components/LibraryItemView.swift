@@ -222,6 +222,16 @@ struct LibraryItemView: View {
         }
         #endif
 
+        if let session = sessionManager.session(for: vm), session.controller.canForceStop {
+            Divider()
+
+            Button {
+                Task { await session.forceStopAfterConfirmation() }
+            } label: {
+                Text("Force Stop…")
+            }
+        }
+
         Divider()
 
         Button {
