@@ -701,10 +701,16 @@ extension VMLibraryController {
 }
 
 extension URL {
-    /// Whether the file resides in a removable volume, or `nil` if it can't be determined.
+    /// Whether the file resides in a volume that can go away while the app runs, or `nil` if it can't be determined.
+    ///
+    /// That includes external drives that report themselves as fixed rather than removable, as many USB and Thunderbolt
+    /// SSDs do, since they can still be unplugged.
     var isInRemovableVolume: Bool? {
-        guard let volumeURL = try? resourceValues(forKeys: [.volumeURLKey]).volume else { return nil }
-        return (try? volumeURL.resourceValues(forKeys: [.volumeIsRemovableKey]))?.volumeIsRemovable
+        guard let volumeURL = try? resourceValues(forKeys: [.volumeURLKey]).volume,
+              let values = try? volumeURL.resourceValues(forKeys: [.volumeIsRemovableKey, .volumeIsEjectableKey, .volumeIsInternalKey])
+        else { return nil }
+
+        return values.volumeIsRemovable == true || values.volumeIsEjectable == true || values.volumeIsInternal == false
     }
 }
 

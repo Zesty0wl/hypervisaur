@@ -41,6 +41,14 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
     func sessionIfAvailable(withID id: VBVirtualMachine.ID) -> VirtualMachineSessionUI? { sessions[id] }
 
     public func launch(_ vm: VBVirtualMachine, library: VMLibraryController, options: VMSessionOptions?) {
+        /// A virtual machine on a disk that has been disconnected can't be opened, and its missing files don't mean that
+        /// it needs installing.
+        guard FileManager.default.fileExists(atPath: vm.bundleURL.path(percentEncoded: false)) else {
+            library.loadMachines()
+            presentMissingVirtualMachineAlert(for: vm)
+            return
+        }
+
         guard !vm.needsInstall else {
             recoverInstallation(for: vm, library: library)
             return
@@ -108,6 +116,13 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
 
             sessions[vmID] = nil
         }
+    }
+
+    private func presentMissingVirtualMachineAlert(for vm: VBVirtualMachine) {
+        let alert = NSAlert()
+        alert.messageText = "“\(vm.name)” Isn’t Available"
+        alert.informativeText = "Its files at \(vm.bundleURL.deletingLastPathComponent().path(percentEncoded: false)) can’t be found. If they’re on an external drive, connect it and try again."
+        alert.runModal()
     }
 
     public func recoverInstallation(for vm: VBVirtualMachine, library: VMLibraryController) {
