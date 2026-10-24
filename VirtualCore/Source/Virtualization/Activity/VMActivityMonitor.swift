@@ -1,0 +1,229 @@
+import Foundation
+import Combine
+
+/// What a virtual machine in the library is doing.
+public enum VMActivityStatus: Hashable, Sendable {
+    case poweredOff
+    /// Not running, with a session saved to resume later.
+    case saved
+    case starting
+    case running
+    case paused
+    case saving
+    case restoring
+
+    public var isRunning: Bool {
+        switch self {
+        case .starting, .running, .paused, .saving, .restoring: true
+        case .poweredOff, .saved: false
+        }
+    }
+}
+
+/// How much of the Mac a running virtual machine is using.
+public struct VMResourceUsage: Hashable, Sendable {
+    /// The share of the virtual machine's processors it's using, from 0 to 1.
+    public var processor: Double
+    /// Recent values of ``processor``, oldest first.
+    public var processorHistory: [Double]
+    /// The Mac's memory that the virtual machine is using, in bytes.
+    public var memory: UInt64
+}
+
+/// Keeps track of what each virtual machine in the library is doing and, while it runs, how much processor time and memory
+/// it uses, for as long as something is showing it.
+@MainActor
+public final class VMActivityMonitor: ObservableObject {
+    @Published public private(set) var statuses = [VBVirtualMachine.ID: VMActivityStatus]()
+    @Published public private(set) var usage = [VBVirtualMachine.ID: VMResourceUsage]()
+    /// The space each virtual machine's files take up on disk, in bytes.
+    @Published public private(set) var storage = [VBVirtualMachine.ID: UInt64]()
+
+    public static let sampleInterval = Duration.seconds(2)
+    /// How many samples ``VMResourceUsage/processorHistory`` keeps.
+    public static let historyLength = 30
+
+    private static let storageInterval = Duration.seconds(30)
+
+    private unowned let library: VMLibraryController
+    private let sampler = VMActivitySampler(historyLength: historyLength)
+    private var observerCount = 0
+    private var samplingTask: Task<Void, Never>?
+    private var lastStorageUpdate: ContinuousClock.Instant?
+    private var cancellables = Set<AnyCancellable>()
+
+    init(library: VMLibraryController) {
+        self.library = library
+    }
+
+    /// Keeps the figures up to date until the calling task is cancelled.
+    public func observe() async {
+        observerCount += 1
+        if observerCount == 1 { start() }
+
+        /// Sleeps until the task that's showing the figures is cancelled.
+        try? await Task.sleep(nanoseconds: .max)
+
+        observerCount -= 1
+        if observerCount == 0 { stop() }
+    }
+
+    private func start() {
+        /// Starting and stopping is shown straight away, rather than at the next sample. The library publishes the change
+        /// before it's made, so the statuses are worked out once it has been.
+        library.$bootedMachineIdentifiers
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.updateStatuses() }
+            }
+            .store(in: &cancellables)
+
+        samplingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.sample()
+                try? await Task.sleep(for: Self.sampleInterval)
+            }
+        }
+    }
+
+    private func stop() {
+        samplingTask?.cancel()
+        samplingTask = nil
+        cancellables.removeAll()
+    }
+
+    private func updateStatuses() {
+        var statuses = [VBVirtualMachine.ID: VMActivityStatus]()
+        for vm in library.virtualMachines {
+            statuses[vm.id] = status(of: vm)
+        }
+        if statuses != self.statuses { self.statuses = statuses }
+    }
+
+    private func status(of vm: VBVirtualMachine) -> VMActivityStatus {
+        let isBooted = library.bootedMachineIdentifiers.contains(vm.id)
+
+        switch library.activeController(for: vm.id)?.state {
+        case .starting, .resizingDisk: return .starting
+        case .running: return .running
+        case .paused: return .paused
+        case .saving: return .saving
+        case .restoring: return .restoring
+        case .saved, .recoveryRequired: return .saved
+        case .idle, .stopped, nil:
+            /// Virtual machines started without a window, such as by automation, only show up as booted.
+            if isBooted { return .running }
+            return vm.savedSession != nil ? .saved : .poweredOff
+        }
+    }
+
+    private func sample() async {
+        updateStatuses()
+
+        let running = library.virtualMachines
+            .filter { statuses[$0.id]?.isRunning == true }
+            .map { VMActivitySampler.Machine(id: $0.id, bundleURL: $0.bundleURL, processorCount: $0.configuration.hardware.cpuCount) }
+
+        let now = ContinuousClock.now
+        let measuresStorage = lastStorageUpdate.map { now - $0 >= Self.storageInterval } ?? true
+            || library.virtualMachines.contains { storage[$0.id] == nil }
+        let storageBundles = measuresStorage ? library.virtualMachines.map { ($0.id, $0.bundleURL) } : []
+
+        let result = await sampler.sample(running, storageOf: storageBundles)
+
+        guard !Task.isCancelled else { return }
+
+        if result.usage != usage { usage = result.usage }
+        if measuresStorage {
+            lastStorageUpdate = now
+            if result.storage != storage { storage = result.storage }
+        }
+    }
+}
+
+/// Measures virtual machines away from the main thread, remembering what it needs between samples.
+private actor VMActivitySampler {
+    struct Machine: Sendable {
+        var id: VBVirtualMachine.ID
+        var bundleURL: URL
+        var processorCount: Int
+    }
+
+    struct Result: Sendable {
+        var usage: [VBVirtualMachine.ID: VMResourceUsage]
+        var storage: [VBVirtualMachine.ID: UInt64]
+    }
+
+    private struct Previous {
+        var pid: pid_t
+        var processorTime: Duration
+        var date: ContinuousClock.Instant
+        var history: [Double]
+    }
+
+    private let historyLength: Int
+    private var previous = [VBVirtualMachine.ID: Previous]()
+
+    init(historyLength: Int) {
+        self.historyLength = historyLength
+    }
+
+    func sample(_ machines: [Machine], storageOf bundles: [(VBVirtualMachine.ID, URL)]) -> Result {
+        previous = previous.filter { id, _ in machines.contains { $0.id == id } }
+
+        var candidates: [pid_t]?
+        var usage = [VBVirtualMachine.ID: VMResourceUsage]()
+
+        for machine in machines {
+            var pid = previous[machine.id]?.pid
+            if let known = pid, !VMProcessInspector.isProcess(known, runningBundleAt: machine.bundleURL) {
+                pid = nil
+                previous[machine.id] = nil
+            }
+            if pid == nil {
+                if candidates == nil { candidates = VMProcessInspector.candidateProcesses() }
+                pid = VMProcessInspector.process(forBundleAt: machine.bundleURL, among: candidates ?? [])
+            }
+
+            guard let pid, let sample = VMProcessInspector.sample(pid) else { continue }
+
+            let now = ContinuousClock.now
+            var history = previous[machine.id]?.history ?? []
+
+            if let last = previous[machine.id], last.pid == pid {
+                let elapsed = (now - last.date) / .seconds(1)
+                let used = (sample.processorTime - last.processorTime) / .seconds(1)
+                let share = elapsed > 0 ? used / (elapsed * Double(max(machine.processorCount, 1))) : 0
+                history.append(min(max(share, 0), 1))
+                history.removeFirst(max(history.count - historyLength, 0))
+            }
+
+            previous[machine.id] = Previous(pid: pid, processorTime: sample.processorTime, date: now, history: history)
+
+            /// The share of the processors needs two samples, so it isn't reported until the second one.
+            guard let current = history.last else { continue }
+            usage[machine.id] = VMResourceUsage(processor: current, processorHistory: history, memory: sample.memoryFootprint)
+        }
+
+        var storage = [VBVirtualMachine.ID: UInt64]()
+        for (id, bundleURL) in bundles {
+            storage[id] = Self.allocatedSize(of: bundleURL)
+        }
+
+        return Result(usage: usage, storage: storage)
+    }
+
+    /// The space the bundle's files take up, which is less than their size for disk images with empty space in them.
+    private static func allocatedSize(of bundleURL: URL) -> UInt64 {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey]
+        guard let enumerator = FileManager.default.enumerator(at: bundleURL, includingPropertiesForKeys: Array(keys)) else { return 0 }
+
+        var total: UInt64 = 0
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+            total += UInt64(values.totalFileAllocatedSize ?? 0)
+        }
+        return total
+    }
+}

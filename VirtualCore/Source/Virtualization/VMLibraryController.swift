@@ -90,6 +90,9 @@ public final class VMLibraryController: ObservableObject {
 
     public private(set) lazy var templatesController = VMTemplatesController(library: self)
 
+    /// What each virtual machine is doing, and what the running ones are using.
+    public private(set) lazy var activityMonitor = VMActivityMonitor(library: self)
+
     public init(settingsContainer: VBSettingsContainer = .current) {
         self.settingsContainer = settingsContainer
         self.settings = settingsContainer.settings

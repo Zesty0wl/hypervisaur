@@ -139,6 +139,8 @@ public struct LibraryView: View {
                 .padding()
                 .padding(.top)
             }
+            /// Running virtual machines show what they're using while the library is open.
+            .task { await library.activityMonitor.observe() }
             /// Brings a virtual machine that was just duplicated into view.
             .onChange(of: library.recentlyDuplicatedMachineIdentifier) { _, identifier in
                 guard let identifier else { return }

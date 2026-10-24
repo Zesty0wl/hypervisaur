@@ -121,21 +121,26 @@ struct LibraryItemView: View {
                     }
                 }
 
-            EphemeralTextField($name, alignment: .leading, setFocus: nameFieldFocus) { name in
-                Text(name)
-            } editableContent: { name in
-                TextField("VM Name", text: name)
-                    .onSubmit { rename(name.wrappedValue) }
-            } validate: { name in
-                do {
-                    try library.validateNewName(name, for: vm)
-                    return true
-                } catch {
-                    return false
+            VStack(alignment: .leading, spacing: 8) {
+                EphemeralTextField($name, alignment: .leading, setFocus: nameFieldFocus) { name in
+                    Text(name)
+                } editableContent: { name in
+                    TextField("VM Name", text: name)
+                        .onSubmit { rename(name.wrappedValue) }
+                } validate: { name in
+                    do {
+                        try library.validateNewName(name, for: vm)
+                        return true
+                    } catch {
+                        return false
+                    }
                 }
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .disabled(isVMBooted || isDuplicating)
+
+                LibraryItemActivityView(vm: vm, monitor: library.activityMonitor)
             }
-            .font(.system(size: 16, weight: .medium, design: .rounded))
-            .disabled(isVMBooted || isDuplicating)
+            .padding(.horizontal, 4)
         }
         .padding([.leading, .trailing, .top], 8)
         .padding(.bottom, 12)
