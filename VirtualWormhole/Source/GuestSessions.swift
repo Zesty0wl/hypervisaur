@@ -16,6 +16,18 @@ public final class HostGuestSession {
         get { engine.onNotification }
         set { engine.onNotification = newValue }
     }
+    /// Called with frames from the Hypervisaur agent in the guest app.
+    public var onAgentFrames: ((Data) -> Void)? {
+        get { engine.onAgentFrames }
+        set { engine.onAgentFrames = newValue }
+    }
+    /// Called when the guest app connects or disconnects, which is when its agent can be reached or not.
+    public var onConnectionChange: ((Bool) -> Void)? {
+        get { engine.onConnectionChange }
+        set { engine.onConnectionChange = newValue }
+    }
+    /// Sends frames to the Hypervisaur agent in the guest app, in order. They're dropped while it isn't connected.
+    public func sendAgentFrames(_ data: Data) { engine.sendAgentFrames(data) }
     public init(connection: VMConnection) {
         engine = GuestSessionEngine(connection: LiveGuestConnection(connection: connection), hostClipboard: .shared, providers: .live)
     }
@@ -65,6 +77,8 @@ final class GuestSessionEngine {
     private(set) var isConnected = false
     var onDesktopPicture: ((GuestDesktopPicture) -> Void)?
     var onNotification: ((String) -> Void)?
+    var onAgentFrames: ((Data) -> Void)?
+    var onConnectionChange: ((Bool) -> Void)?
     private let connection: any GuestConnection
     private let hostClipboard: HostClipboardCoordinator?
     private let providers: GuestFeatureProviders
@@ -93,11 +107,50 @@ final class GuestSessionEngine {
     }
     private var pendingDefaults: [UUID: PendingDefaults] = [:]
 
+    /// Agent frames are sent from one task, in the order they were given, unlike other messages. Each run has its own outbox.
+    private var agentOutbox: AsyncStream<Data>.Continuation?
+
+    /// The guest's agent, which runs programs for the Mac. The host doesn't have one.
+    private var agentRunner: GuestAgentRunner?
+
     init(connection: any GuestConnection, hostClipboard: HostClipboardCoordinator? = nil, providers: GuestFeatureProviders, requestTimeout: Duration = .seconds(30)) {
         self.requestTimeout = requestTimeout
         self.connection = connection
         self.hostClipboard = hostClipboard
         self.providers = providers
+
+        if hostClipboard == nil {
+            /// Frames go through the main queue, which keeps a program's output and exit in order.
+            agentRunner = GuestAgentRunner { [weak self] data in
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.sendAgentFrames(data) } }
+            }
+        }
+    }
+
+    func sendAgentFrames(_ data: Data) {
+        agentOutbox?.yield(data)
+    }
+
+    private func setConnected(_ connected: Bool) {
+        guard isConnected != connected else { return }
+        isConnected = connected
+        onConnectionChange?(connected)
+
+        if connected {
+            agentRunner?.connected()
+        } else {
+            agentRunner?.disconnected()
+        }
+    }
+
+    private func receiveAgentFrames(_ message: GuestAgentFrames) {
+        guard !Task.isCancelled, message.session == session else { return }
+
+        if let agentRunner {
+            agentRunner.receive(message.data)
+        } else {
+            onAgentFrames?(message.data)
+        }
     }
 
     @discardableResult func start() -> Task<Void, Never> {
@@ -109,6 +162,9 @@ final class GuestSessionEngine {
         let clipboard = connection.messages(of: ClipboardUpdate.self)
         let pictures = connection.messages(of: DesktopPictureUpdate.self)
         let notifications = connection.messages(of: GuestNotification.self)
+        let agentFrames = connection.messages(of: GuestAgentFrames.self)
+        let (agentOutbox, agentOutboxContinuation) = AsyncStream.makeStream(of: Data.self, bufferingPolicy: .unbounded)
+        self.agentOutbox = agentOutboxContinuation
         let offers = connection.fileOffers
         let task = Task {
             await withTaskGroup(of: Void.self) { group in
@@ -119,6 +175,14 @@ final class GuestSessionEngine {
                 group.addTask { for await picture in pictures { await self.receivePicture(picture) } }
                 group.addTask { for await notification in notifications { await self.receiveNotification(notification) } }
                 group.addTask { for await offer in offers { await self.receiveOffer(offer) } }
+                group.addTask { for await frames in agentFrames { await self.receiveAgentFrames(frames) } }
+                group.addTask {
+                    for await data in agentOutbox {
+                        guard let token = await self.session, await self.isConnected else { continue }
+                        do { try await self.connection.send(GuestAgentFrames(session: token, data: data)) }
+                        catch { await self.log(error) }
+                    }
+                }
                 group.addTask {
                     while !Task.isCancelled {
                         do { try await Task.sleep(for: .milliseconds(500)) } catch { break }
@@ -134,6 +198,8 @@ final class GuestSessionEngine {
                 group.cancelAll()
             }
             invalidateSession()
+            agentOutboxContinuation.finish()
+            self.agentOutbox = nil
             let remaining = Array(operations.values)
             let pendingImports = Array(imports.values)
             for task in remaining { await task.value }
@@ -168,7 +234,7 @@ final class GuestSessionEngine {
 
     private func invalidateSession() {
         session = nil
-        isConnected = false
+        setConnected(false)
         clipboardInitialized = false
         hostClipboard?.unregister(identity)
         removeNotifications?()
@@ -198,7 +264,7 @@ final class GuestSessionEngine {
         schedule { [self] in
             let reply = try await self.connection.request(InitializeGuest(session: token), reply: InitializeGuestReply.self, timeout: self.requestTimeout)
             try self.requireSession(token)
-            self.isConnected = true
+            self.setConnected(true)
             self.logger.notice("Connected to host")
             do {
                 self.removeNotifications = try self.providers.notifications(reply.notifications.intersection(Self.notificationNames)) { [weak self] name in
@@ -220,7 +286,7 @@ final class GuestSessionEngine {
         schedule { [self] in
             try await request.reply(.init(notifications: Self.notificationNames))
             try self.requireSession(token)
-            self.isConnected = true
+            self.setConnected(true)
             self.logger.notice("Initialized guest session")
             self.hostClipboard?.register(self.identity) { [weak self] items in self?.sendClipboard(items) }
         }

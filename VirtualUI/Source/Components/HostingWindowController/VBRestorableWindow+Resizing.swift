@@ -60,19 +60,39 @@ extension VBRestorableWindow {
         withFrameConstraintsDisabled(size != .fitScreen) {
             setFrame(frameRect, display: true)
         }
+
+        chosenContentWidth = targetSize.width
     }
 
     func applyAspectRatio(_ ratio: CGSize?) {
+        /// Resize increments and aspect ratios replace each other.
         guard let ratio else {
-            resizeIncrements = CGSize(width: 1, height: 1)
+            contentResizeIncrements = CGSize(width: 1, height: 1)
             return
         }
 
         contentAspectRatio = ratio
 
-        let newFrame = frameRect(forContentRect: AVMakeRect(aspectRatio: ratio, insideRect: contentRect(forFrameRect: frame)))
+        guard !styleMask.contains(.fullScreen) else { return }
 
-        setFrame(newFrame, display: true)
+        /// The window keeps its chosen width and its top edge where it is, unless that would make it taller than the screen allows,
+        /// so that it doesn't shrink each time the proportions change.
+        let currentContentRect = contentRect(forFrameRect: frame)
+        var contentRect = currentContentRect
+        contentRect.size.width = chosenContentWidth ?? currentContentRect.width
+        contentRect.size.height = (contentRect.width * ratio.height / ratio.width).rounded()
+        contentRect.origin.y = currentContentRect.maxY - contentRect.height
+
+        if let screen {
+            let availableRect = self.contentRect(forFrameRect: screen.visibleFrame)
+            if contentRect.height > availableRect.height {
+                let fittedSize = AVMakeRect(aspectRatio: ratio, insideRect: CGRect(origin: .zero, size: CGSize(width: contentRect.width, height: availableRect.height))).integral.size
+                contentRect = CGRect(origin: CGPoint(x: contentRect.minX, y: availableRect.minY), size: fittedSize)
+            }
+            contentRect.origin.y = max(contentRect.origin.y, availableRect.minY)
+        }
+
+        setFrame(frameRect(forContentRect: contentRect), display: true)
     }
 
 }

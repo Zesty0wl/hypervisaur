@@ -14,6 +14,10 @@ public final class VirtualMachineSessionUI: ObservableObject {
 
     @Published public var lockProportions = false
 
+    /// The resolution of the guest's display while it runs, unless the display follows the size of the window.
+    /// The window keeps the same proportions as the display, so that it isn't surrounded by black bars.
+    @Published private(set) var fixedGuestDisplaySize: CGSize?
+
     @Published private(set) var eventDeliveryMask = VMEventDeliveryMask.all
 
     @Published var captureMouseEvents = true
@@ -71,19 +75,19 @@ public final class VirtualMachineSessionUI: ObservableObject {
         self.prompts = SessionAlertPrompts(ui: self)
         self.closer = SessionCloseCoordinator(controller: controller, prompts: prompts)
 
-        $lockProportions.dropFirst().removeDuplicates().sink { [weak self] newValue in
-            guard let self = self else { return }
+        $lockProportions.combineLatest($fixedGuestDisplaySize)
+            .dropFirst()
+            .map { [weak self] lockProportions, fixedGuestDisplaySize -> CGSize? in
+                if let fixedGuestDisplaySize { return fixedGuestDisplaySize }
 
-            guard let display = self.virtualMachine.configuration.hardware.displayDevices.first else {
-                assertionFailure("VM doesn't have a display")
-                return
+                guard lockProportions, let display = self?.virtualMachine.configuration.hardware.displayDevices.first else { return nil }
+                return CGSize(width: display.width, height: display.height)
             }
-
-            let ratio = newValue ? CGSize(width: display.width, height: display.height) : nil
-
-            self.setWindowAspectRatio.send(ratio)
-        }
-        .store(in: &cancellables)
+            .removeDuplicates()
+            .sink { [weak self] ratio in
+                self?.setWindowAspectRatio.send(ratio)
+            }
+            .store(in: &cancellables)
 
         $captureMouseEvents.sink { [weak self] captureMouse in
             if captureMouse {
@@ -113,10 +117,27 @@ public final class VirtualMachineSessionUI: ObservableObject {
         }
         .store(in: &cancellables)
 
-        /// A recording ends with the virtual machine's display.
-        controller.$state.map { $0.isRunning || $0.isPaused }.removeDuplicates().sink { [weak self] isShowingDisplay in
-            guard !isShowingDisplay, let self, self.recording != nil else { return }
-            Task { await self.stopRecording() }
+        /// A recording ends with the virtual machine's display, and the window is free to take any shape.
+        controller.$state.map(ShownDisplay.init).removeDuplicates().sink { [weak self] display in
+            guard let self else { return }
+
+            guard display != .none else {
+                self.fixedGuestDisplaySize = nil
+
+                if self.recording != nil {
+                    Task { await self.stopRecording() }
+                }
+                return
+            }
+
+            /// Virtualization keeps the display at its configured size, unless it's set to follow the window. QEMU reports
+            /// the guest's resolution from its frames instead, since Windows can change it.
+            if display == .virtualization,
+               let device = self.virtualMachine.configuration.hardware.displayDevices.first,
+               !device.automaticallyReconfiguresDisplay
+            {
+                self.fixedGuestDisplaySize = CGSize(width: device.width, height: device.height)
+            }
         }
         .store(in: &cancellables)
     }
@@ -166,6 +187,28 @@ public final class VirtualMachineSessionUI: ObservableObject {
         if newOptions.autoBoot, controller.canStart {
             Task { await startOrResume() }
         }
+    }
+
+    /// Which kind of virtual machine's display is shown, which is while it runs or is paused.
+    private enum ShownDisplay {
+        case none
+        case virtualization
+        case qemu
+
+        init(_ state: VMState) {
+            switch state {
+            case .running(.virtualization), .paused(.virtualization): self = .virtualization
+            case .running(.qemu), .paused(.qemu): self = .qemu
+            default: self = .none
+            }
+        }
+    }
+
+    /// Called with each new resolution of a guest display that doesn't follow the size of the window.
+    @MainActor
+    func fixedGuestDisplaySizeChanged(_ size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        fixedGuestDisplaySize = size
     }
 
     @MainActor
@@ -339,6 +382,24 @@ private struct VirtualMachineGuestActions: View {
                 .keyboardShortcut("w", modifiers: [.command, .option])
                 .disabled(actionTask != nil || controller?.state.canSaveAndClose != true)
             }
+
+            Divider()
+
+            Button {
+                session?.openShell()
+            } label: {
+                Label("Open Shell", systemImage: "terminal")
+            }
+            .keyboardShortcut("t", modifiers: [.command, .option])
+            .disabled(controller?.state.isRunning != true)
+
+            Button {
+                session?.showLogs()
+            } label: {
+                Label("Show Logs", systemImage: "list.bullet.rectangle")
+            }
+            .keyboardShortcut("l", modifiers: [.command, .option])
+            .disabled(controller?.state.isRunning != true)
 
             Divider()
 

@@ -184,6 +184,74 @@ struct GuestSessionTests {
     }
 }
 
+/// The agent in the guest app runs programs for the Mac, which the tests run on this Mac.
+@Suite @MainActor
+struct GuestAgentSessionTests {
+    @MainActor private final class ReceivedFrames {
+        private var decoder = GuestAgentFrameDecoder()
+        private(set) var frames = [GuestAgentFrame]()
+
+        func receive(_ data: Data) {
+            frames += (try? decoder.decode(data)) ?? []
+        }
+
+        func output(on channel: UInt32, kind: GuestAgentFrame.Kind = .output) -> String {
+            String(decoding: frames.filter { $0.channel == channel && $0.kind == kind }.reduce(Data()) { $0 + $1.payload }, as: UTF8.self)
+        }
+
+        func exitStatus(on channel: UInt32) -> Int32? {
+            frames.first { $0.channel == channel && $0.kind == .exited }?.exitStatus
+        }
+    }
+
+    private func open(_ fixture: SessionFixture, channel: UInt32, _ request: GuestAgentOpenRequest) {
+        fixture.host.sendAgentFrames(GuestAgentFrame(.open, channel: channel, payload: request.payload).encoded())
+        if !request.usesTerminal {
+            fixture.host.sendAgentFrames(GuestAgentFrame(.inputEnd, channel: channel).encoded())
+        }
+    }
+
+    @Test func agentGreetsTheHostAndRunsPrograms() async throws {
+        let fixture = await SessionFixture.make()
+        let received = ReceivedFrames()
+        fixture.host.onAgentFrames = { received.receive($0) }
+        try await fixture.connect()
+
+        try await eventually { received.frames.contains { $0.kind == .hello } }
+        let hello = try #require(received.frames.first { $0.kind == .hello })
+        #expect(try GuestAgentInfo(payload: hello.payload).system.hasPrefix("macOS "))
+
+        open(fixture, channel: 1, GuestAgentOpenRequest(command: "echo hello; echo oops >&2; exit 3"))
+        try await eventually { received.exitStatus(on: 1) != nil }
+        #expect(received.output(on: 1) == "hello\n")
+        #expect(received.output(on: 1, kind: .errorOutput) == "oops\n")
+        #expect(received.exitStatus(on: 1) == 3)
+
+        open(fixture, channel: 2, GuestAgentOpenRequest(command: "stty size; tty", usesTerminal: true, columns: 100, rows: 30))
+        try await eventually { received.exitStatus(on: 2) != nil }
+        #expect(received.output(on: 2).contains("30 100"))
+        #expect(received.output(on: 2).contains("/dev/ttys"))
+
+        await fixture.stop()
+    }
+
+    @Test func programsAreStoppedWithEverythingTheyStarted() async throws {
+        let fixture = await SessionFixture.make()
+        let received = ReceivedFrames()
+        fixture.host.onAgentFrames = { received.receive($0) }
+        try await fixture.connect()
+
+        open(fixture, channel: 1, GuestAgentOpenRequest(command: "sleep 120 & sleep 120"))
+        try await Task.sleep(for: .milliseconds(300))
+        fixture.host.sendAgentFrames(GuestAgentFrame(.terminate, channel: 1).encoded())
+
+        try await eventually { received.exitStatus(on: 1) != nil }
+        #expect(received.exitStatus(on: 1) == 128 + SIGKILL)
+
+        await fixture.stop()
+    }
+}
+
 @MainActor private func eventually(_ condition: () async -> Bool) async throws {
     let deadline = ContinuousClock.now.advanced(by: .seconds(5))
     while !(await condition()) {

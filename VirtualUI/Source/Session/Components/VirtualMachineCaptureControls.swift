@@ -41,6 +41,31 @@ struct VirtualMachineCaptureControls: View {
     }
 }
 
+/// Toolbar buttons that open a shell in the guest and show its logs, through the Hypervisaur agent in the guest.
+struct VirtualMachineGuestAgentControls: View {
+    @EnvironmentObject private var ui: VirtualMachineSessionUI
+
+    var body: some View {
+        Group {
+            Button {
+                ui.openShell()
+            } label: {
+                Label("Open Shell", systemImage: "terminal")
+                    .labelStyle(.iconOnly)
+            }
+            .help("Open a shell in the virtual machine in Terminal")
+
+            Button {
+                ui.showLogs()
+            } label: {
+                Label("Show Logs", systemImage: "list.bullet.rectangle")
+                    .labelStyle(.iconOnly)
+            }
+            .help("Show the virtual machine’s logs as they’re logged")
+        }
+    }
+}
+
 /// Tells the session which view the virtual machine's display fills. It's placed behind that view, so it has the same frame.
 struct VMDisplayViewReader: NSViewRepresentable {
     var session: VirtualMachineSessionUI

@@ -8,15 +8,16 @@ import VirtualCore
 /// Starting and stopping go through the app's URL scheme, so the app asks the user once whether to allow it.
 enum VirtualMachineTools {
     static var all: [MCPTool] {
-        [listVirtualMachines, getStatus, getWindowsRequirements, installWindowsRequirements, createWindowsVM, waitForWindowsVM, startVM, stopVM, takeScreenshot, cloneVM]
+        [listVirtualMachines, getStatus, getWindowsRequirements, installWindowsRequirements, createWindowsVM, waitForWindowsVM, startVM, stopVM, takeScreenshot, cloneVM, runCommand, getGuestLogs]
     }
 
     static let instructions = """
     Creates and runs Windows 11 virtual machines in Hypervisaur on this Mac. create_windows_vm installs Windows without \
     any interaction and signs in to a local account, which takes about 10 minutes; call wait_for_windows_vm afterwards \
     to wait until the desktop is ready. take_screenshot shows what's on a running virtual machine's display, and clone_vm \
-    makes a copy of a virtual machine that can run alongside it. The first time Hypervisaur is asked to do something, \
-    it asks the user to allow it.
+    makes a copy of a virtual machine that can run alongside it. run_command runs commands in a running virtual machine, \
+    in PowerShell on Windows, and get_guest_logs shows its recent log entries. The first time Hypervisaur is asked to \
+    start or stop something, it asks the user to allow it.
     """
 
     // MARK: - Tools
@@ -170,6 +171,77 @@ enum VirtualMachineTools {
             return try await clone(model, as: arguments.string("clone_name"), progress: progress)
         }
     )
+
+    private static let runCommand = MCPTool(
+        name: "run_command",
+        title: "Run Command",
+        description: """
+        Runs a command in a running virtual machine and returns its output and exit status. On Windows, commands run in \
+        PowerShell as the system account, so they can change anything. On Linux they run with /bin/sh as root, and on macOS \
+        with the user's login shell, as the user who's signed in. Commands can't be interactive: they get no input and have \
+        no terminal. The virtual machine needs the Hypervisaur agent: Windows installs it from the DRIVERS disk when it starts, \
+        Linux installs it from the HYPERVISAUR disc, and on macOS it's part of the guest app.
+        """,
+        inputSchema: schema([
+            "name": property("string", "The name of the virtual machine."),
+            "command": property("string", "The command to run, which can have several lines."),
+            "timeout_seconds": property("integer", "How long the command may run before it's stopped. Defaults to 120."),
+        ], required: ["name", "command"]),
+        run: { arguments, _ in
+            let model = try Library.machine(named: try arguments.requiredString("name"))
+            let timeout = Duration.seconds(max(1, arguments.integer("timeout_seconds") ?? 120))
+            let result = try await GuestAgentClient.run(
+                try arguments.requiredString("command"),
+                inVirtualMachineAt: model.bundleURL,
+                name: model.name,
+                timeout: timeout,
+                outputLimit: commandOutputLimit
+            )
+            return describe(result, timeout: timeout)
+        }
+    )
+
+    private static let getGuestLogs = MCPTool(
+        name: "get_guest_logs",
+        title: "Get Guest Logs",
+        description: """
+        Returns the most recent entries from a running virtual machine's logs, oldest first: the System and Application \
+        event logs on Windows, the unified log on macOS, and the journal on Linux. Needs the Hypervisaur agent, like run_command.
+        """,
+        inputSchema: schema([
+            "name": property("string", "The name of the virtual machine."),
+            "count": property("integer", "How many entries to return. Defaults to 100, at most 1000."),
+        ], required: ["name"]),
+        run: { arguments, _ in
+            let model = try Library.machine(named: try arguments.requiredString("name"))
+            let count = min(max(1, arguments.integer("count") ?? 100), 1000)
+            let result = try await GuestAgentClient.run(
+                GuestLogs.recentCommand(for: model.configuration.systemType, count: count),
+                inVirtualMachineAt: model.bundleURL,
+                name: model.name,
+                timeout: .seconds(60),
+                outputLimit: commandOutputLimit
+            )
+            let entries = String(decoding: result.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return entries.isEmpty ? "There are no log entries." : entries
+        }
+    )
+
+    /// Output is limited so that the reply stays a reasonable size for the agent that asked.
+    private static let commandOutputLimit = 200_000
+
+    private static func describe(_ result: GuestAgentCommandResult, timeout: Duration) -> String {
+        var sections = [result.timedOut ? "The command was stopped after \(timeout.components.seconds) seconds." : "Exit status: \(result.status)"]
+
+        let output = String(decoding: result.output, as: UTF8.self).trimmingCharacters(in: .newlines)
+        let errorOutput = String(decoding: result.errorOutput, as: UTF8.self).trimmingCharacters(in: .newlines)
+        if !output.isEmpty { sections.append("Output:\n\(output)") }
+        if !errorOutput.isEmpty { sections.append("Errors:\n\(errorOutput)") }
+        if output.isEmpty && errorOutput.isEmpty { sections.append("There was no output.") }
+        if result.isTruncated { sections.append("Some of the output was left out because there was more than \(commandOutputLimit) bytes.") }
+
+        return sections.joined(separator: "\n\n")
+    }
 
     // MARK: - Creating
 
@@ -355,19 +427,11 @@ private enum Library {
     static var url: URL { VBSettings.current.libraryURL }
 
     static func machines() throws -> [VBVirtualMachine] {
-        guard url.isReadableDirectory else { return [] }
-
-        return try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)
-            .filter { $0.pathExtension == VBVirtualMachine.bundleExtension }
-            .compactMap { try? VBVirtualMachine(bundleURL: $0, createIfNeeded: false) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        try VBVirtualMachine.libraryMachines(in: url)
     }
 
     static func machine(named name: String) throws -> VBVirtualMachine {
-        guard let model = try machines().first(where: { $0.name == name }) else {
-            throw Failure("There’s no virtual machine named “\(name)” in the library at \(url.path).")
-        }
-        return model
+        try VBVirtualMachine.libraryMachine(named: name, in: url)
     }
 
     static func windowsMachine(named name: String) throws -> VBVirtualMachine {

@@ -41,7 +41,7 @@ struct GuestIsolationConfigurationTests {
                 vm.configuration.guestAdditionsEnabled = guestAppEnabled
                 vm.configuration.rosettaSharingEnabled = rosettaEnabled
                 let console = LinuxVirtualMachineConfigurationHelper(vm: vm)
-                    .createSpiceAgentConsoleDeviceConfiguration()
+                    .createConsoleDevice(guestAgentPort: nil)
 
                 if enabled {
                     let device = try #require(console)
@@ -54,5 +54,23 @@ struct GuestIsolationConfigurationTests {
                 }
             }
         }
+    }
+
+    @Test(arguments: [false, true])
+    func linuxGuestAgentHasAPortOfItsOwn(clipboardSharingEnabled: Bool) throws {
+        let bundleURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(VBVirtualMachine.bundleExtension)
+        var vm = try VBVirtualMachine(creatingLinuxMachineAt: bundleURL)
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+        vm.configuration.clipboardSharingEnabled = clipboardSharingEnabled
+
+        let agentPort = try GuestAgentConsolePort()
+        let console = try #require(LinuxVirtualMachineConfigurationHelper(vm: vm).createConsoleDevice(guestAgentPort: agentPort.configuration))
+
+        let port = try #require(console.ports[1])
+        #expect(port.name == "hypervisaur.agent")
+        #expect(port.attachment is VZFileHandleSerialPortAttachment)
+        #expect((console.ports[0]?.attachment is VZSpiceAgentPortAttachment) == clipboardSharingEnabled)
     }
 }

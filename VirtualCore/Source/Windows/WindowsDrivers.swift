@@ -5,17 +5,33 @@ import CryptoKit
 ///
 /// Windows doesn't include drivers for any of the network adapters that QEMU can emulate. Red Hat's virtio drivers are signed
 /// by Microsoft and available for ARM, and UTM publishes them on GitHub as part of its guest tools. Only the drivers for
-/// Windows 11 on ARM are kept, along with their license. The SPICE agent that shares the clipboard is kept with them, but it
-/// comes with the app, since it's built from source; see `WindowsSPICEAgent` in the repository.
+/// Windows 11 on ARM are kept, along with their license. The programs that are installed with them come with the app, since
+/// they're built from source. See ``BundledProgram``.
 public enum WindowsDrivers {
     public static let version = "0.1.271"
 
     /// Identifies what's kept from the guest tools, so that the drivers are installed again when that changes.
     static let contentsVersion = "\(version)-4"
 
-    /// The folder with the SPICE agent, which shares the clipboard with the Mac, both in the app and with the drivers.
-    static let clipboardAgentFolderName = "SPICEAgent"
-    static let clipboardAgentFileNames = ["vdagent.exe", "vdservice.exe"]
+    /// A program that comes with the app, in a folder of its own, and that's installed in Windows from the drivers disk.
+    struct BundledProgram: Sendable {
+        /// The name of the program's folder, both in the app and on the drivers disk.
+        var folderName: String
+        /// The program's files, which must all be there. Its folder can have others, such as its licenses.
+        var fileNames: [String]
+        var description: String
+    }
+
+    /// The SPICE agent, which shares the clipboard with the Mac. See `WindowsSPICEAgent` in the repository.
+    ///
+    /// The agent in UTM's guest tools is built in a way that makes it stop whenever Windows releases the clipboard, which
+    /// happens each time something is copied there, and anything copied while it starts again isn't shared with the Mac.
+    static let clipboardAgent = BundledProgram(folderName: "SPICEAgent", fileNames: ["vdagent.exe", "vdservice.exe"], description: "the clipboard agent")
+
+    /// The Hypervisaur agent, which runs programs in Windows for the Mac. See `WindowsGuestAgent` in the repository.
+    static let guestAgent = BundledProgram(folderName: "HypervisaurAgent", fileNames: ["HypervisaurAgent.exe"], description: "the Hypervisaur agent")
+
+    static let bundledPrograms = [clipboardAgent, guestAgent]
 
     static let sourceURL = URL(string: "https://github.com/utmapp/qemu/releases/download/v10.0.2-utm/utm-guest-tools-0.1.271.iso")!
     static let sourceSHA256 = "65b6a69b392ee01dd314c10f3dad9ebbf9c4160be43f5f0dd6bb715944d9095b"
@@ -121,9 +137,6 @@ public enum WindowsDrivers {
         let drivers = try extractDrivers(from: mountPoint, to: stagingURL)
         onOutput("Found ARM64 drivers: \(drivers.joined(separator: ", "))")
 
-        try copyClipboardAgent(to: stagingURL)
-        onOutput("Added the SPICE agent for ARM64")
-
         FileManager.default.createFile(atPath: stagingURL.appending(path: installedMarkerName).path, contents: Data(contentsVersion.utf8))
 
         if FileManager.default.fileExists(atPath: destinationURL.path) {
@@ -143,25 +156,40 @@ public enum WindowsDrivers {
         }
     }
 
-    /// The SPICE agent for ARM that comes with the app.
-    ///
-    /// The agent in UTM's guest tools is built in a way that makes it stop whenever Windows releases the clipboard, which
-    /// happens each time something is copied there, and anything copied while it starts again isn't shared with the Mac.
-    static var bundledClipboardAgentURL: URL? {
-        Bundle.virtualCore.url(forResource: clipboardAgentFolderName, withExtension: nil)
+    static func bundledURL(of program: BundledProgram) -> URL? {
+        Bundle.virtualCore.url(forResource: program.folderName, withExtension: nil)
     }
 
-    static func copyClipboardAgent(from sourceURL: URL? = bundledClipboardAgentURL, to destinationURL: URL) throws {
+    /// Copies the program's folder into the directory, replacing any earlier copy.
+    static func copy(_ program: BundledProgram, from sourceURL: URL?, into directoryURL: URL) throws {
         guard let sourceURL else {
-            throw Failure("Hypervisaur doesn’t include the clipboard agent for Windows.")
+            throw Failure("Hypervisaur doesn’t include \(program.description) for Windows.")
         }
 
-        for name in clipboardAgentFileNames where !FileManager.default.fileExists(atPath: sourceURL.appending(path: name).path) {
-            throw Failure("Hypervisaur doesn’t include \(name), which shares the clipboard with Windows.")
+        for name in program.fileNames where !FileManager.default.fileExists(atPath: sourceURL.appending(path: name).path) {
+            throw Failure("Hypervisaur doesn’t include \(name), which is part of \(program.description) for Windows.")
         }
 
-        try FileManager.default.copyItem(at: sourceURL, to: destinationURL.appending(path: clipboardAgentFolderName, directoryHint: .isDirectory))
+        let destinationURL = directoryURL.appending(path: program.folderName, directoryHint: .isDirectory)
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
     }
+
+    /// Identifies the programs that come with the app, so that the drivers disk is created again, and Windows installs them
+    /// again, when they change.
+    static let bundledProgramsDigest: String = {
+        var hasher = SHA256()
+        for program in bundledPrograms {
+            guard let folderURL = bundledURL(of: program) else { continue }
+            for name in program.fileNames {
+                hasher.update(data: Data(name.utf8))
+                hasher.update(data: (try? Data(contentsOf: folderURL.appending(path: name))) ?? Data())
+            }
+        }
+        return hasher.finalize().prefix(6).map { String(format: "%02x", $0) }.joined()
+    }()
 
     /// Where each driver is taken from in the guest tools, if not `w11/ARM64`.
     ///

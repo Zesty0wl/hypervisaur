@@ -366,6 +366,30 @@
           ],
         },
       ],
+    }, {
+      "kind": "folder",
+      "path": "WindowsGuestAgent",
+      "membership-exceptions": [
+        {
+          "build-phase": "VirtualCore/copy/Copy Windows Guest Agent",
+          "inclusions": [
+            "ARM64/HypervisaurAgent.exe",
+          ],
+        },
+      ],
+    }, {
+      "kind": "folder",
+      "path": "LinuxGuestAgent",
+      "membership-exceptions": [
+        {
+          "build-phase": "VirtualCore/copy/Copy Linux Guest Agent",
+          "inclusions": [
+            "hypervisaur-agent",
+            "hypervisaur-agent.service",
+            "install.sh",
+          ],
+        },
+      ],
     },
   ],
   "targets": [
@@ -407,6 +431,7 @@
           "output-paths": [
             "$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/vctool",
             "$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/vbmcp",
+            "$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/MacOS/hvctl",
           ],
           "shell": "/bin/sh",
           "script": [
@@ -418,6 +443,9 @@
             "",
             "# Symlink VirtualBuddy as vbmcp for the Model Context Protocol server",
             "ln -fs $EXECUTABLE_NAME vbmcp",
+            "",
+            "# Symlink VirtualBuddy as hvctl, which runs programs in virtual machines",
+            "ln -fs $EXECUTABLE_NAME hvctl",
             "",
           ],
         }, {
@@ -649,6 +677,16 @@
           "name": "Copy Windows SPICE Agent",
           "bundle-base-path": "resources-directory",
           "relative-path": "SPICEAgent",
+        }, {
+          "kind": "copy",
+          "name": "Copy Windows Guest Agent",
+          "bundle-base-path": "resources-directory",
+          "relative-path": "HypervisaurAgent",
+        }, {
+          "kind": "copy",
+          "name": "Copy Linux Guest Agent",
+          "bundle-base-path": "resources-directory",
+          "relative-path": "LinuxGuestAgent",
         }, {
           "kind": "copy",
           "name": "Copy Preview Library",

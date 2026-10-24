@@ -43,14 +43,14 @@ struct QEMULaunchConfigurationTests {
         #expect(!arguments.contains { $0.contains("media=cdrom") })
     }
 
-    @Test func driversDiskIsAttachedOverNVMe() throws {
+    @Test func driversDiskIsARemovableUSBDrive() throws {
         let vm = try makeWindowsMachine()
         try createBootDisk(for: vm)
 
         let arguments = try makeConfiguration(for: vm, driversDiskURL: vm.windowsDriversDiskURL).arguments()
 
-        #expect(arguments.contains("if=none,id=drivers,format=raw,file=\(vm.windowsDriversDiskURL.path),cache=writeback"))
-        #expect(arguments.contains("nvme,drive=drivers,serial=VBDRIVERS"))
+        #expect(arguments.contains("if=none,id=drivers,format=raw,file=\(vm.windowsDriversDiskURL.path),readonly=on"))
+        #expect(arguments.contains("usb-storage,bus=xhci.0,drive=drivers,removable=on"))
     }
 
     @Test func virtioGPUStartsAtConfiguredDisplaySize() throws {
@@ -65,6 +65,16 @@ struct QEMULaunchConfigurationTests {
 
         #expect(arguments.contains("virtio-gpu-pci,xres=1600,yres=480"))
         #expect(!arguments.contains("ramfb"))
+    }
+
+    @Test func guestAgentPortIsServedOnASocket() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        let arguments = try makeConfiguration(for: vm).arguments()
+
+        #expect(arguments.contains("socket,id=vbagent,path=/tmp/vbq-test/agent.sock,server=on,wait=off"))
+        #expect(arguments.contains("virtserialport,bus=vbserial.0,chardev=vbagent,name=hypervisaur.agent"))
     }
 
     @Test(arguments: [true, false])
@@ -199,7 +209,8 @@ struct QEMULaunchConfigurationTests {
             runtimePaths: .init(
                 monitorSocket: URL(filePath: "/tmp/vbq-test/qmp.sock"),
                 displaySocket: URL(filePath: "/tmp/vbq-test/vnc.sock"),
-                tpmSocket: URL(filePath: "/tmp/vbq-test/tpm.sock")
+                tpmSocket: URL(filePath: "/tmp/vbq-test/tpm.sock"),
+                agentSocket: URL(filePath: "/tmp/vbq-test/agent.sock")
             ),
             installDiskURL: installDiskURL,
             driversDiskURL: driversDiskURL

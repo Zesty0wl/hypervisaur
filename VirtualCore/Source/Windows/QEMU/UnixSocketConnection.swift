@@ -45,6 +45,14 @@ final class UnixSocketConnection: @unchecked Sendable {
         self.fd = fd
     }
 
+    /// Takes over a connected socket, such as one that a listening socket accepted.
+    init(fileDescriptor fd: Int32) {
+        var noSigPipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+
+        self.fd = fd
+    }
+
     /// Connects to the socket at the path, retrying until it's available or the deadline passes.
     static func connect(path: String, timeout: Duration, isCancelled: () -> Bool = { false }) async throws -> UnixSocketConnection {
         let clock = ContinuousClock()
@@ -79,6 +87,21 @@ final class UnixSocketConnection: @unchecked Sendable {
                 offset += result
             } else if result == 0 {
                 throw Failure("The connection was closed.")
+            } else if errno != EINTR {
+                throw POSIXError.current
+            }
+        }
+    }
+
+    /// Reads whatever is available, up to `maxLength` bytes, waiting until something is. Returns `nil` once the connection is closed.
+    func readAvailable(maxLength: Int) throws -> Data? {
+        var data = Data(count: maxLength)
+        while true {
+            let result = data.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, maxLength) }
+            if result > 0 {
+                return data.prefix(result)
+            } else if result == 0 {
+                return nil
             } else if errno != EINTR {
                 throw POSIXError.current
             }

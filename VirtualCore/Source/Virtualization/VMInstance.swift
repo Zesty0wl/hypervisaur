@@ -61,6 +61,11 @@ public final class VMInstance: NSObject, ObservableObject {
     
     private var guestSession: HostGuestSession?
 
+    /// The port for the Hypervisaur agent in the guest, and the connection to it while the virtual machine runs.
+    private var guestAgentPort: GuestAgentConsolePort?
+    private var guestAgent: GuestAgentConnection?
+    private var guestAgentServer: GuestAgentServer?
+
     /// Whether the guest app running in the virtual machine is currently connected to the host.
     @Published private(set) var isGuestAppConnected = false
     private var guestRunTask: Task<Void, Never>?
@@ -146,6 +151,8 @@ public final class VMInstance: NSObject, ObservableObject {
     struct RuntimeConfiguration {
         let configuration: VZVirtualMachineConfiguration
         let guestAdditionsMediaURL: URL?
+        /// The port for the Hypervisaur agent in a Linux guest.
+        let guestAgentPort: GuestAgentConsolePort?
     }
 
     static func makeRuntimeConfiguration(for model: VBVirtualMachine, installImageURL: URL?, restoration: SavedSessionRestoration?) async throws -> RuntimeConfiguration {
@@ -184,8 +191,9 @@ public final class VMInstance: NSObject, ObservableObject {
         c.entropyDevices = helper.createEntropyDevices()
         c.audioDevices = model.configuration.vzAudioDevices
         c.directorySharingDevices = try model.configuration.vzSharedFoldersFileSystemDevices
-        if let spiceAgent = helper.createSpiceAgentConsoleDeviceConfiguration() {
-            c.consoleDevices = [spiceAgent]
+        let guestAgentPort = model.configuration.systemType == .linux ? try GuestAgentConsolePort() : nil
+        if let consoleDevice = helper.createConsoleDevice(guestAgentPort: guestAgentPort?.configuration) {
+            c.consoleDevices = [consoleDevice]
         }
         if #available(macOS 15.0, *) {
             c.usbControllers = helper.createUSBControllers()
@@ -194,9 +202,16 @@ public final class VMInstance: NSObject, ObservableObject {
         let bootDevice = try await helper.createBootBlockDevice()
         let additionalBlockDevices = try await helper.createAdditionalBlockDevices()
 
-        c.storageDevices = installDevice + [bootDevice] + additionalBlockDevices
+        /// The disc that the Hypervisaur agent is installed from stays attached to Linux guests until the agent has connected.
+        var toolsDevices = [VZStorageDeviceConfiguration]()
+        if model.configuration.systemType == .linux, !LinuxGuestTools.hasAgentConnected(in: model) {
+            let attachment = try VZDiskImageStorageDeviceAttachment(url: try await LinuxGuestTools.discImageURL(), readOnly: true)
+            toolsDevices.append(VZUSBMassStorageDeviceConfiguration(attachment: attachment))
+        }
 
-        return RuntimeConfiguration(configuration: c, guestAdditionsMediaURL: await helper.guestAdditionsMediaURL())
+        c.storageDevices = installDevice + [bootDevice] + additionalBlockDevices + toolsDevices
+
+        return RuntimeConfiguration(configuration: c, guestAdditionsMediaURL: await helper.guestAdditionsMediaURL(), guestAgentPort: guestAgentPort)
     }
 
     private func createVirtualMachine(restoration: SavedSessionRestoration?) async throws {
@@ -232,6 +247,7 @@ public final class VMInstance: NSObject, ObservableObject {
 
         runtimeModel = model
         guestAdditionsMediaURL = runtime.guestAdditionsMediaURL
+        guestAgentPort = runtime.guestAgentPort
 
         networkAttachmentHelper?.stop()
 
@@ -280,6 +296,59 @@ public final class VMInstance: NSObject, ObservableObject {
         observeGuestConnection(in: session)
     }
 
+    /// Lets programs on the Mac run programs in the guest through the Hypervisaur agent: over its own port in Linux guests,
+    /// and with the guest app's messages in macOS guests, whose agent is part of the guest app.
+    private func startGuestAgent() {
+        guard guestAgent == nil else { return }
+
+        let model = virtualMachineModel
+        let connection: GuestAgentConnection
+        let unavailableMessage: @Sendable () -> String
+
+        if let port = guestAgentPort {
+            connection = GuestAgentConnection(transport: GuestAgentStreamTransport(name: "GuestAgent", socket: port.socket), guestName: model.name)
+            connection.onInfoChange = { info in
+                guard info != nil else { return }
+                LinuxGuestTools.recordAgentConnected(in: model)
+            }
+            unavailableMessage = { LinuxGuestTools.unavailableMessage(for: model) }
+        } else if let guestSession {
+            connection = GuestAgentConnection(transport: GuestAppAgentTransport(session: guestSession), guestName: model.name)
+            guestSession.onConnectionChange = { [weak connection] isConnected in
+                if !isConnected { connection?.agentDisconnected() }
+            }
+            unavailableMessage = { "The Hypervisaur agent is part of the guest app, which isn’t running in “\(model.name)”. Install the guest app from the Guest disk, and keep it running." }
+        } else {
+            return
+        }
+
+        do {
+            let server = try GuestAgentServer(
+                connection: connection,
+                socketURL: GuestAgentServer.socketURL(forVirtualMachineAt: model.bundleURL),
+                guestName: model.name,
+                unavailableMessage: unavailableMessage
+            )
+
+            guestAgent = connection
+            guestAgentServer = server
+            connection.start()
+            server.start()
+        } catch {
+            logger.error("Failed to start the guest agent server: \(error, privacy: .public)")
+            connection.close()
+        }
+    }
+
+    /// The port can't be used again once it's closed, so the next configuration makes a new one.
+    private func stopGuestAgent() {
+        guestAgentServer?.close()
+        guestAgentServer = nil
+        guestAgent?.close()
+        guestAgent = nil
+        guestAgentPort = nil
+    }
+
     private func observeGuestConnection(in session: HostGuestSession) {
         isGuestAppConnected = withObservationTracking {
             session.isConnected
@@ -292,6 +361,7 @@ public final class VMInstance: NSObject, ObservableObject {
     }
 
     func stopGuestCommunication() async {
+        stopGuestAgent()
         let session = guestSession
         guestSession = nil
         isGuestAppConnected = false
@@ -329,6 +399,7 @@ public final class VMInstance: NSObject, ObservableObject {
                 .validateMicrophonePolicy(preferences: VirtualBuddyManagedPreferences.schema.reader())
             try await vm.start(options: startOptions)
             enforceSharedFoldersPolicy()
+            startGuestAgent()
 
             networkAttachmentHelper?.startMonitoringHostInterfaces()
             startUSBDeviceMonitoring(for: vm)
@@ -338,6 +409,7 @@ public final class VMInstance: NSObject, ObservableObject {
             #endif
         } catch {
             await stopGuestCommunication()
+            stopGuestAgent()
             library.unregisterBootedVM(self)
             throw error
         }
@@ -414,6 +486,7 @@ public final class VMInstance: NSObject, ObservableObject {
         networkAttachmentHelper?.stop()
         stopUSBDeviceMonitoring()
         removeWorkingGuestAdditionsMedia()
+        stopGuestAgent()
 
         library.unregisterBootedVM(self)
     }
@@ -540,6 +613,7 @@ public final class VMInstance: NSObject, ObservableObject {
         networkAttachmentHelper?.stop()
         stopUSBDeviceMonitoring()
         await stopGuestCommunication()
+        stopGuestAgent()
         library.unregisterBootedVM(self)
         sharedFoldersPolicyObservation = nil
         _virtualMachine = nil
@@ -606,6 +680,7 @@ public final class VMInstance: NSObject, ObservableObject {
 
         await stopGuestCommunication()
         try startGuestCommunication()
+        startGuestAgent()
 
         networkAttachmentHelper?.startMonitoringHostInterfaces()
         startUSBDeviceMonitoring(for: vm)
@@ -621,6 +696,7 @@ public final class VMInstance: NSObject, ObservableObject {
         await stopGuestCommunication()
         do {
             try startGuestCommunication()
+            startGuestAgent()
         } catch {
             logger.error("Failed to restart guest communication: \(error, privacy: .public)")
         }
@@ -711,6 +787,7 @@ extension VMInstance: VZVirtualMachineDelegate {
 
         Task { [self] in
             await stopGuestCommunication()
+            stopGuestAgent()
             removeWorkingGuestAdditionsMedia()
             library.unregisterBootedVM(self)
             onVMStop(error)

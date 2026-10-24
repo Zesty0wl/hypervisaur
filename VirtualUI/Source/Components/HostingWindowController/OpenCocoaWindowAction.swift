@@ -85,6 +85,7 @@ public struct OpenCocoaWindowAction {
     private var manager: OpenCocoaWindowManager { .shared }
     
     /// Opens a new Mac window with the SwiftUI content provided.
+    /// - Parameter preferredContentSize: The size of the window's content when it opens without a saved frame that can be used.
     /// - Parameter content: A view builder that provides the contents of the window.
     /// - Returns: A ``Token`` that can be used to monitor or modify the state of the new window.
     ///
@@ -92,13 +93,13 @@ public struct OpenCocoaWindowAction {
     /// structure that you get from the Environment.
     @MainActor
     @discardableResult
-    public func callAsFunction<Content>(id: String? = nil, animationBehavior: NSWindow.AnimationBehavior? = nil, @ViewBuilder _ content: @escaping () -> Content, onClose: (() -> Void)? = nil) -> Token where Content: View {
+    public func callAsFunction<Content>(id: String? = nil, preferredContentSize: CGSize? = nil, animationBehavior: NSWindow.AnimationBehavior? = nil, @ViewBuilder _ content: @escaping () -> Content, onClose: (() -> Void)? = nil) -> Token where Content: View {
         let token = Token(id: id ?? UUID().uuidString)
 
         if let existingController = manager[token] {
             existingController.showWindow(nil)
         } else {
-            let controller = HostingWindowController(id: id, rootView: content(), onWindowClose: { _ in onClose?() })
+            let controller = HostingWindowController(id: id, rootView: content(), preferredContentSize: preferredContentSize, onWindowClose: { _ in onClose?() })
 
             if let animationBehavior {
                 controller.window?.animationBehavior = animationBehavior

@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""
+The Hypervisaur agent for Linux, which runs programs in the virtual machine for the Mac.
+
+It runs as a systemd service, and talks to Hypervisaur over the virtio console port named hypervisaur.agent, using the frames
+that GuestAgentFrame.swift describes. Each program runs on a channel of its own, in a process group of its own so that stopping
+it also stops the programs it started, and with a pseudo terminal when it needs one.
+
+Usage: hypervisaur-agent [port]
+The port defaults to /dev/virtio-ports/hypervisaur.agent.
+"""
+
+import fcntl
+import os
+import platform
+import pty
+import pwd
+import signal
+import struct
+import subprocess
+import sys
+import termios
+import threading
+import time
+
+PORT_PATH = "/dev/virtio-ports/hypervisaur.agent"
+PROTOCOL_VERSION = 1
+
+HEADER = struct.Struct("<IBI")
+MAX_PAYLOAD = 1 << 20
+CHUNK_SIZE = 16 * 1024
+
+# How long output is still read after a program exits, since programs it started in the background can keep its output open.
+OUTPUT_DRAIN_TIMEOUT = 2
+
+RESET, OPEN, INPUT, INPUT_END, RESIZE, TERMINATE = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06
+HELLO, OUTPUT, ERROR_OUTPUT, EXITED, FAILED = 0x41, 0x42, 0x43, 0x44, 0x45
+
+
+def log(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+class Port:
+    """The port, which frames are written to from any thread."""
+
+    def __init__(self, path):
+        self.path = path
+        self.fd = None
+        self.lock = threading.Lock()
+
+    def open(self):
+        self.fd = os.open(self.path, os.O_RDWR)
+
+    def send(self, kind, channel, payload=b""):
+        frame = HEADER.pack(len(payload), kind, channel) + payload
+        with self.lock:
+            if self.fd is None:
+                return
+            try:
+                view = memoryview(frame)
+                while view:
+                    written = os.write(self.fd, view)
+                    view = view[written:]
+            except OSError as error:
+                log(f"Couldn't send a frame of kind 0x{kind:02x} on channel {channel}: {error}")
+
+    def read(self):
+        return os.read(self.fd, 64 * 1024)
+
+
+class Session:
+    def __init__(self, agent, channel, command, uses_terminal, columns, rows):
+        self.agent = agent
+        self.channel = channel
+        self.terminal = None
+        self.readers = []
+
+        environment = dict(os.environ, TERM="xterm-256color")
+        if command:
+            arguments = ["/bin/sh", "-c", command]
+        else:
+            shell = pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
+            arguments = [shell, "-l"]
+
+        if uses_terminal:
+            self.terminal, child = pty.openpty()
+            self.resize(columns, rows)
+            self.process = subprocess.Popen(
+                arguments, stdin=child, stdout=child, stderr=child, cwd="/", env=environment,
+                start_new_session=True, preexec_fn=self._take_terminal, close_fds=True,
+            )
+            os.close(child)
+            self.input = self.terminal
+            self._read(self.terminal, OUTPUT)
+        else:
+            self.process = subprocess.Popen(
+                arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd="/",
+                env=environment, start_new_session=True, close_fds=True,
+            )
+            self.input = self.process.stdin.fileno()
+            self._read(self.process.stdout.fileno(), OUTPUT)
+            self._read(self.process.stderr.fileno(), ERROR_OUTPUT)
+
+        threading.Thread(target=self._wait, daemon=True).start()
+
+    @staticmethod
+    def _take_terminal():
+        """Makes the pseudo terminal the program's controlling terminal, so that job control and Control-C work."""
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    def _read(self, fd, kind):
+        def read():
+            while True:
+                try:
+                    data = os.read(fd, CHUNK_SIZE)
+                except OSError:
+                    break
+                if not data:
+                    break
+                self.agent.port.send(kind, self.channel, data)
+
+        thread = threading.Thread(target=read, daemon=True)
+        thread.start()
+        self.readers.append(thread)
+
+    def _wait(self):
+        status = self.process.wait()
+
+        if self.terminal is not None:
+            # The terminal's output ends once the program and everything else using the terminal have closed it.
+            deadline = time.monotonic() + OUTPUT_DRAIN_TIMEOUT
+            for reader in self.readers:
+                reader.join(max(0, deadline - time.monotonic()))
+        else:
+            for reader in self.readers:
+                reader.join(OUTPUT_DRAIN_TIMEOUT)
+
+        self.agent.remove(self)
+        exit_status = status if status >= 0 else 128 - status
+        self.agent.port.send(EXITED, self.channel, struct.pack("<i", exit_status))
+        self.close()
+
+    def write(self, data):
+        try:
+            view = memoryview(data)
+            while view and self.input is not None:
+                written = os.write(self.input, view)
+                view = view[written:]
+        except OSError:
+            pass
+
+    def end_input(self):
+        # A terminal's input stays open, since closing it would end the terminal.
+        if self.terminal is None and self.process.stdin and not self.process.stdin.closed:
+            self.process.stdin.close()
+            self.input = None
+
+    def resize(self, columns, rows):
+        if self.terminal is not None and columns and rows:
+            fcntl.ioctl(self.terminal, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+
+    def terminate(self):
+        try:
+            os.killpg(self.process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    def close(self):
+        if self.terminal is not None:
+            try:
+                os.close(self.terminal)
+            except OSError:
+                pass
+            self.terminal = None
+        for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+            if stream and not stream.closed:
+                stream.close()
+
+
+class Agent:
+    def __init__(self, port):
+        self.port = port
+        self.sessions = {}
+        self.lock = threading.Lock()
+
+    def remove(self, session):
+        with self.lock:
+            if self.sessions.get(session.channel) is session:
+                del self.sessions[session.channel]
+
+    def session(self, channel):
+        with self.lock:
+            return self.sessions.get(channel)
+
+    def hello(self):
+        try:
+            with open("/etc/os-release") as file:
+                values = dict(line.rstrip("\n").split("=", 1) for line in file if "=" in line)
+            name = values.get("PRETTY_NAME", "Linux").strip('"')
+        except OSError:
+            name = "Linux"
+        description = f"{name} ({platform.release()}) {platform.machine()}"
+        self.port.send(HELLO, 0, struct.pack("<I", PROTOCOL_VERSION) + description.encode())
+
+    def terminate_all(self):
+        with self.lock:
+            sessions = list(self.sessions.values())
+        for session in sessions:
+            session.terminate()
+
+    def handle(self, kind, channel, payload):
+        if kind == RESET:
+            log("Hypervisaur connected")
+            self.terminate_all()
+            self.hello()
+        elif kind == OPEN:
+            self.open(channel, payload)
+        elif kind == INPUT:
+            session = self.session(channel)
+            if session:
+                session.write(payload)
+        elif kind == INPUT_END:
+            session = self.session(channel)
+            if session:
+                session.end_input()
+        elif kind == RESIZE and len(payload) >= 4:
+            session = self.session(channel)
+            if session:
+                session.resize(*struct.unpack_from("<HH", payload))
+        elif kind == TERMINATE:
+            session = self.session(channel)
+            if session:
+                session.terminate()
+
+    def open(self, channel, payload):
+        if len(payload) < 5:
+            self.port.send(FAILED, channel, b"The request to run a program is incomplete.")
+            return
+
+        uses_terminal = bool(payload[0] & 1)
+        columns, rows = struct.unpack_from("<HH", payload, 1)
+        command = payload[5:].decode("utf-8", "replace")
+
+        try:
+            session = Session(self, channel, command, uses_terminal, columns or 80, rows or 24)
+        except OSError as error:
+            log(f"Channel {channel}: couldn't start the program: {error}")
+            self.port.send(FAILED, channel, f"Couldn't start the program: {error.strerror or error}.".encode())
+            return
+
+        with self.lock:
+            self.sessions[channel] = session
+
+    def run(self):
+        """Reads frames until the port fails."""
+        buffer = bytearray()
+        while True:
+            data = self.port.read()
+            if not data:
+                # Nothing is read while Hypervisaur isn't connected.
+                time.sleep(0.25)
+                continue
+
+            buffer += data
+            while len(buffer) >= HEADER.size:
+                length, kind, channel = HEADER.unpack_from(buffer)
+                if length > MAX_PAYLOAD:
+                    log(f"Received a frame that's too large ({length} bytes), discarding what was received")
+                    buffer.clear()
+                    break
+                if len(buffer) < HEADER.size + length:
+                    break
+                payload = bytes(buffer[HEADER.size:HEADER.size + length])
+                del buffer[:HEADER.size + length]
+                self.handle(kind, channel, payload)
+
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else PORT_PATH
+    last_error = None
+
+    while True:
+        port = Port(path)
+        try:
+            port.open()
+        except OSError as error:
+            if str(error) != last_error:
+                log(f"Couldn't open {path} ({error}), trying again")
+            last_error = str(error)
+            time.sleep(5)
+            continue
+
+        log(f"Opened {path}")
+        last_error = None
+        agent = Agent(port)
+        agent.hello()
+        try:
+            agent.run()
+        except OSError as error:
+            log(f"The port closed ({error}), opening it again")
+        agent.terminate_all()
+        with port.lock:
+            os.close(port.fd)
+            port.fd = None
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    main()

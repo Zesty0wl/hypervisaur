@@ -21,12 +21,15 @@ public final class HostingWindowController<Content>: NSWindowController, NSWindo
         )
     }
 
-    public init(id: String? = nil, rootView: Content, windowFactory: (() -> NSWindow)? = nil, onWindowClose: WindowCloseBlock? = nil) {
+    /// - Parameter preferredContentSize: The size of the window's content when it opens without a saved frame that can be used.
+    public init(id: String? = nil, rootView: Content, preferredContentSize: CGSize? = nil, windowFactory: (() -> NSWindow)? = nil, onWindowClose: WindowCloseBlock? = nil) {
         let window = windowFactory?() ?? Self.makeDefaultWindow()
 
         if let id {
             window.identifier = .init(id)
         }
+
+        (window as? VBRestorableWindow)?.preferredContentSize = preferredContentSize
         
         super.init(window: window)
 

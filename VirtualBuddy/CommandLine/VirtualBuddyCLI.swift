@@ -11,6 +11,7 @@ struct VirtualBuddyCLI {
     static let supportedEntryPoints: [ParsableCommand.Type] = [
         VCTool.self,
         VBMCP.self,
+        HVCtl.self,
     ]
 
     static func runCommand(named name: String) async {

@@ -19,6 +19,12 @@ struct ClipboardUpdate: VMMessage {
     let items: [ClipboardItem]
 }
 
+/// Frames to or from the Hypervisaur agent in the guest app. See ``GuestAgentFrame``.
+struct GuestAgentFrames: VMMessage {
+    let session: UUID
+    let data: Data
+}
+
 struct GuestNotification: VMMessage {
     let session: UUID
     let name: String

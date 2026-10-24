@@ -85,20 +85,16 @@ struct WindowsInstallDiskTests {
         #expect(FileManager.default.fileExists(atPath: destinationURL.appending(path: "NetKVM/netkvmco.dll").path))
         #expect(FileManager.default.fileExists(atPath: destinationURL.appending(path: "virtio-win_license.txt").path))
         #expect(FileManager.default.fileExists(atPath: destinationURL.appending(path: ".installed").path))
-        let bundledAgentURL = try #require(WindowsDrivers.bundledClipboardAgentURL)
-        for name in ["vdagent.exe", "vdservice.exe", "COPYING.txt", "SOURCES.txt"] {
-            let installed = try Data(contentsOf: destinationURL.appending(path: "SPICEAgent/\(name)"))
-            #expect(installed == (try Data(contentsOf: bundledAgentURL.appending(path: name))))
-        }
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: destinationURL.deletingLastPathComponent().path)
         #expect(leftovers == ["0.1.271-4"])
     }
 
     /// Windows on ARM programs are PE files for the ARM64 machine type.
-    @Test(arguments: WindowsDrivers.clipboardAgentFileNames)
-    func bundledClipboardAgentIsForWindowsOnARM(name: String) throws {
-        let agentURL = try #require(WindowsDrivers.bundledClipboardAgentURL)
-        let data = try Data(contentsOf: agentURL.appending(path: name))
+    @Test(arguments: WindowsDrivers.bundledPrograms.flatMap { program in program.fileNames.map { (program.folderName, $0) } })
+    func bundledProgramsAreForWindowsOnARM(folderName: String, name: String) throws {
+        let program = try #require(WindowsDrivers.bundledPrograms.first { $0.folderName == folderName })
+        let folderURL = try #require(WindowsDrivers.bundledURL(of: program))
+        let data = try Data(contentsOf: folderURL.appending(path: name))
 
         #expect(data.prefix(2) == Data("MZ".utf8))
         let headerOffset = Int(data[0x3C]) | Int(data[0x3D]) << 8 | Int(data[0x3E]) << 16 | Int(data[0x3F]) << 24
@@ -107,17 +103,17 @@ struct WindowsInstallDiskTests {
         #expect(machine == 0xAA64)
     }
 
-    @Test func incompleteClipboardAgentIsRejected() throws {
+    @Test func incompleteBundledProgramIsRejected() throws {
         let directory = try makeTemporaryDirectory()
         let agentURL = directory.appending(path: "agent", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: agentURL, withIntermediateDirectories: true)
         try Data("agent".utf8).write(to: agentURL.appending(path: "vdagent.exe"))
 
         #expect(throws: (any Error).self) {
-            try WindowsDrivers.copyClipboardAgent(from: agentURL, to: directory)
+            try WindowsDrivers.copy(WindowsDrivers.clipboardAgent, from: agentURL, into: directory)
         }
         #expect(throws: (any Error).self) {
-            try WindowsDrivers.copyClipboardAgent(from: nil, to: directory)
+            try WindowsDrivers.copy(WindowsDrivers.clipboardAgent, from: nil, into: directory)
         }
     }
 
@@ -158,6 +154,13 @@ struct WindowsInstallDiskTests {
 
         let folderURL = mountPoint.appending(path: WindowsDriversDisk.driversFolderName)
         #expect(FileManager.default.fileExists(atPath: folderURL.appending(path: "NetKVM/netkvm.inf").path))
+        for program in WindowsDrivers.bundledPrograms {
+            let bundledURL = try #require(WindowsDrivers.bundledURL(of: program))
+            for name in program.fileNames {
+                let copied = try Data(contentsOf: folderURL.appending(path: "\(program.folderName)/\(name)"))
+                #expect(copied == (try Data(contentsOf: bundledURL.appending(path: name))))
+            }
+        }
         #expect(!FileManager.default.fileExists(atPath: folderURL.appending(path: ".installed").path))
         let script = try String(contentsOf: folderURL.appending(path: WindowsDriversDisk.setupScriptName), encoding: .utf8)
         #expect(script == WindowsDriversDisk.setupScript)
@@ -165,6 +168,15 @@ struct WindowsInstallDiskTests {
         #expect(statusScript == WindowsDriversDisk.statusScript)
         let setupVersion = try String(contentsOf: folderURL.appending(path: WindowsDriversDisk.setupVersionFileName), encoding: .utf8)
         #expect(setupVersion == WindowsDriversDisk.contentsVersion)
+    }
+
+    @Test func setupScriptInstallsTheGuestAgentService() {
+        let script = WindowsDriversDisk.setupScript
+        #expect(script.contains("net stop HypervisaurAgent"))
+        #expect(script.contains("copy /y \"%~dp0HypervisaurAgent\\*.*\" \"%GuestAgentFolder%\""))
+        #expect(script.contains("sc create HypervisaurAgent binPath= \"\\\"%GuestAgentFolder%\\HypervisaurAgent.exe\\\"\" start= auto"))
+        #expect(script.contains("sc failure HypervisaurAgent reset= 86400 actions= restart/5000/restart/5000/restart/5000"))
+        #expect(script.contains("net start HypervisaurAgent"))
     }
 
     @Test func setupScriptInstallsTheClipboardAgentService() {
@@ -178,6 +190,9 @@ struct WindowsInstallDiskTests {
     @Test func statusScriptRunsNewerSetupWhenWindowsStarts() {
         let script = WindowsDriversDisk.statusScript
         #expect(script.contains("fc /b \"%%d:\\VirtIODrivers\\Setup.version\" \"%ProgramData%\\Hypervisaur\\Setup.version\" >nul 2>&1 || call \"%%d:\\VirtIODrivers\\Setup.cmd\""))
+        /// The drivers disk is a USB drive, which may not be mounted yet when Windows starts.
+        #expect(script.contains("for /l %%i in (1,1,15) do if not defined DriversChecked ("))
+        #expect(script.contains("if not defined DriversChecked ping -n 3 127.0.0.1 >nul"))
     }
 
     @Test func setupScriptInstallsDriversAndSignInTask() {

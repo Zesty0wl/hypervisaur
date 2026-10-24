@@ -12,6 +12,8 @@ struct QEMUDisplayView: NSViewRepresentable {
     /// Called with the progress of the shortcuts that toggle input devices when held down.
     /// The shortcuts are only enabled when a handler is provided.
     var onInputToggleHold: ((VMInputToggleHoldEvent) -> Void)? = nil
+    /// Called when the guest's display changes resolution, and with its resolution once the first frame arrives.
+    var onDisplaySizeChange: ((CGSize) -> Void)? = nil
 
     func makeNSView(context: Context) -> QEMUFramebufferView {
         QEMUFramebufferView(frame: .zero)
@@ -22,6 +24,7 @@ struct QEMUDisplayView: NSViewRepresentable {
         nsView.capturesSystemKeys = captureSystemKeysEnabled
         nsView.eventDeliveryMask = context.environment.virtualMachineEventDeliveryMask
         nsView.inputToggleHoldHandler = onInputToggleHold
+        nsView.displaySizeHandler = onDisplaySizeChange
     }
 }
 
@@ -69,6 +72,8 @@ final class QEMUFramebufferView: NSView {
         get { inputToggleMonitor.handler }
         set { inputToggleMonitor.handler = newValue }
     }
+
+    var displaySizeHandler: ((CGSize) -> Void)?
 
     private let inputToggleMonitor = VMInputToggleEventMonitor()
     private var frameObserver: UUID?
@@ -123,6 +128,7 @@ final class QEMUFramebufferView: NSView {
         if size != framebufferSize {
             framebufferSize = size
             window?.invalidateCursorRects(for: self)
+            displaySizeHandler?(size)
         }
 
         CATransaction.begin()

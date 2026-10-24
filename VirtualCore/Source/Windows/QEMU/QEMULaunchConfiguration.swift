@@ -6,6 +6,7 @@ struct QEMULaunchConfiguration {
         var monitorSocket: URL
         var displaySocket: URL
         var tpmSocket: URL
+        var agentSocket: URL
     }
 
     enum DisplayAdapter: Equatable {
@@ -27,6 +28,9 @@ struct QEMULaunchConfiguration {
 
     /// The port that the SPICE agent in the guest looks for.
     static let spiceAgentPortName = "com.redhat.spice.0"
+
+    /// The port that the Hypervisaur agent in the guest looks for, which runs programs there for the Mac.
+    static let guestAgentPortName = "hypervisaur.agent"
 
     func arguments() throws -> [String] {
         let configuration = model.configuration
@@ -71,10 +75,13 @@ struct QEMULaunchConfiguration {
             ]
         }
 
+        /// Hypervisaur replaces the drivers disk while Windows is shut down. When Windows resumes with Fast Startup, it assumes
+        /// that its disks haven't changed, and goes on using what it remembers of them. It checks removable disks again, so the
+        /// drivers disk is a removable USB drive. It's read-only, since Windows only reads it, so that nothing can be written over it.
         if let driversDiskURL {
             arguments += [
-                "-drive", "if=none,id=drivers,format=raw,file=\(driversDiskURL.path.qemuOptionEscaped),cache=writeback",
-                "-device", "nvme,drive=drivers,serial=VBDRIVERS",
+                "-drive", "if=none,id=drivers,format=raw,file=\(driversDiskURL.path.qemuOptionEscaped),readonly=on",
+                "-device", "usb-storage,bus=xhci.0,drive=drivers,removable=on",
             ]
         }
 
@@ -83,6 +90,9 @@ struct QEMULaunchConfiguration {
             "-device", "virtio-serial-pci,id=vbserial",
             "-chardev", "file,id=vbstatus,path=\(model.windowsGuestStatusURL.path.qemuOptionEscaped)",
             "-device", "virtserialport,bus=vbserial.0,chardev=vbstatus,name=\(WindowsGuestStatus.portName)",
+            /// Hypervisaur connects to the agent's port through this socket once QEMU has started.
+            "-chardev", "socket,id=vbagent,path=\(runtimePaths.agentSocket.path.qemuOptionEscaped),server=on,wait=off",
+            "-device", "virtserialport,bus=vbserial.0,chardev=vbagent,name=\(Self.guestAgentPortName)",
             "-pidfile", model.qemuPIDFileURL.path,
         ]
 

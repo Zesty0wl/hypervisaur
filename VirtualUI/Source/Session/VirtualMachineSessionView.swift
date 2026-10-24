@@ -76,15 +76,16 @@ public struct VirtualMachineSessionView: View {
             guard let sessionManager, let ui else { return }
             sessionManager.focusedSessionChanged.send(isKey ? .init(ui) : nil)
         }
-        .onAppearOnce {
-            guard vbWindow?.hasSavedFrame == false else { return }
-            guard let display = controller.virtualMachineModel.configuration.hardware.displayDevices.first else { return }
-            vbWindow?.resize(to: .fitScreen, for: display)
-        }
         .onReceive(ui.resizeWindow) { size in
-            guard let display = controller.virtualMachineModel.configuration.hardware.displayDevices.first else {
+            guard var display = controller.virtualMachineModel.configuration.hardware.displayDevices.first else {
                 assertionFailure("VM doesn't have a display")
                 return
+            }
+
+            /// The window is sized for the guest's actual resolution when it doesn't follow the window.
+            if let guestDisplaySize = ui.fixedGuestDisplaySize {
+                display.width = Int(guestDisplaySize.width)
+                display.height = Int(guestDisplaySize.height)
             }
 
             vbWindow?.resize(to: size, for: display)
@@ -112,6 +113,14 @@ public struct VirtualMachineSessionView: View {
                     if #available(macOS 26, *) {
                         ToolbarSpacer(.fixed)
                     }
+                }
+
+                ToolbarItemGroup(placement: .primaryAction) {
+                    VirtualMachineGuestAgentControls()
+                }
+
+                if #available(macOS 26, *) {
+                    ToolbarSpacer(.fixed)
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -219,7 +228,10 @@ public struct VirtualMachineSessionView: View {
             QEMUDisplayView(
                 machine: machine,
                 captureSystemKeysEnabled: controller.virtualMachineModel.configuration.captureSystemKeys,
-                onInputToggleHold: onInputToggleHold
+                onInputToggleHold: onInputToggleHold,
+                onDisplaySizeChange: { [weak ui] size in
+                    ui?.fixedGuestDisplaySizeChanged(size)
+                }
             )
             .virtualMachineEventDeliveryMask(ui.eventDeliveryMask)
         }

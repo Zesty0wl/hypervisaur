@@ -90,7 +90,10 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
             return await self.presentMACAddressConflictAlert(conflicts: conflicts)
         }
 
-        openWindow(id: vmID) {
+        /// The window opens at the size of the virtual machine's display, as far as it fits on the screen.
+        let preferredContentSize = vm.configuration.hardware.displayDevices.first.map { CGSize(width: $0.width, height: $0.height) }
+
+        openWindow(id: vmID, preferredContentSize: preferredContentSize) {
             VirtualMachineSessionView()
                 .environmentObject(session)
                 .environmentObject(session.controller)

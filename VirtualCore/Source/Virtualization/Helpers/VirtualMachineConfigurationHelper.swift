@@ -22,8 +22,9 @@ protocol VirtualMachineConfigurationHelper {
     func createKeyboardConfiguration() -> VZKeyboardConfiguration
     func createGraphicsDevices() -> [VZGraphicsDeviceConfiguration]
     func createEntropyDevices() -> [VZVirtioEntropyDeviceConfiguration]
+    /// The console device with the SPICE agent's port, which shares the clipboard, and the Hypervisaur agent's port, if the guest has them.
     @available(macOS 13.0, *)
-    func createSpiceAgentConsoleDeviceConfiguration() -> VZVirtioConsoleDeviceConfiguration?
+    func createConsoleDevice(guestAgentPort: VZVirtioConsolePortConfiguration?) -> VZVirtioConsoleDeviceConfiguration?
     @available(macOS 15.0, *)
     func createUSBControllers() -> [VZUSBControllerConfiguration]
 }
@@ -86,7 +87,7 @@ extension VirtualMachineConfigurationHelper {
     func createEntropyDevices() -> [VZVirtioEntropyDeviceConfiguration] { [] }
 
     @available(macOS 13.0, *)
-    func createSpiceAgentConsoleDeviceConfiguration() -> VZVirtioConsoleDeviceConfiguration? { nil }
+    func createConsoleDevice(guestAgentPort: VZVirtioConsolePortConfiguration?) -> VZVirtioConsoleDeviceConfiguration? { nil }
 
     @available(macOS 15.0, *)
     func createUSBControllers() -> [VZUSBControllerConfiguration] { [] }

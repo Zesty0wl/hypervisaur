@@ -35,6 +35,8 @@ public final class QEMUVirtualMachine: ObservableObject {
     private var monitor: QMPClient?
     private var display: VNCClient?
     private var clipboardSync: QEMUClipboardSync?
+    private var guestAgent: GuestAgentConnection?
+    private var guestAgentServer: GuestAgentServer?
     private var runtimeDirectoryURL: URL?
     private var isStopExpected = false
     private var didReportStop = false
@@ -202,7 +204,8 @@ public final class QEMUVirtualMachine: ObservableObject {
         let paths = QEMULaunchConfiguration.RuntimePaths(
             monitorSocket: runtimeDirectoryURL.appending(path: "qmp.sock"),
             displaySocket: runtimeDirectoryURL.appending(path: "vnc.sock"),
-            tpmSocket: runtimeDirectoryURL.appending(path: "tpm.sock")
+            tpmSocket: runtimeDirectoryURL.appending(path: "tpm.sock"),
+            agentSocket: runtimeDirectoryURL.appending(path: "agent.sock")
         )
 
         let configuration = QEMULaunchConfiguration(
@@ -245,7 +248,32 @@ public final class QEMUVirtualMachine: ObservableObject {
             clipboardSync.start()
         }
 
+        try await startGuestAgent(socketURL: paths.agentSocket)
+
         try await monitor.execute("cont")
+    }
+
+    /// Connects to the agent's port and lets programs on the Mac reach it. The agent replies once Windows has started it.
+    private func startGuestAgent(socketURL: URL) async throws {
+        let socket = try await connectToQEMU {
+            try await UnixSocketConnection.connect(path: socketURL.path, timeout: .seconds(10))
+        }
+
+        let connection = GuestAgentConnection(transport: GuestAgentStreamTransport(name: "GuestAgent", socket: socket), guestName: model.name)
+
+        let name = model.name
+        let server = try GuestAgentServer(
+            connection: connection,
+            socketURL: GuestAgentServer.socketURL(forVirtualMachineAt: model.bundleURL),
+            guestName: name
+        ) {
+            "The Hypervisaur agent isn’t running in “\(name)”. Windows installs it when it starts after Hypervisaur updates its DRIVERS disk. If it still isn’t running once Windows has started, open the DRIVERS disk in Windows, then right-click VirtIODrivers\\Setup.cmd and choose Run as Administrator."
+        }
+
+        guestAgent = connection
+        guestAgentServer = server
+        connection.start()
+        server.start()
     }
 
     private func prepareBundle(toolchain: QEMUToolchain) async throws {
@@ -400,6 +428,11 @@ public final class QEMUVirtualMachine: ObservableObject {
     }
 
     private func tearDown() async {
+        guestAgentServer?.close()
+        guestAgentServer = nil
+        guestAgent?.close()
+        guestAgent = nil
+
         clipboardSync?.stop()
         clipboardSync = nil
         display?.onFrame = nil

@@ -1,0 +1,10 @@
+[Unit]
+Description=Hypervisaur Agent, which runs programs in this virtual machine for Hypervisaur on the Mac
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/sbin/hypervisaur-agent
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
