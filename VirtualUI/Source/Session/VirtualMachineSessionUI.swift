@@ -36,6 +36,21 @@ public final class VirtualMachineSessionUI: ObservableObject {
     /// The window that presents this session. Alerts are presented as sheets on it.
     weak var hostWindow: NSWindow?
 
+    /// The view that the virtual machine's display fills, which is what screenshots and recordings capture.
+    weak var displayView: NSView?
+
+    /// The recording of the virtual machine's display that's in progress.
+    @Published var recording: VMScreenRecording?
+
+    /// Whether a screenshot is being taken, which takes a moment for guests that are captured from their window.
+    @Published var isTakingScreenshot = false
+
+    /// Sent with each screenshot or recording once it's saved.
+    let capturedFileSaved = PassthroughSubject<URL, Never>()
+
+    /// Follows the display while it's recorded. See `observeDisplayViewFrame(_:)`.
+    var displayViewFrameObserver: AnyCancellable?
+
     /// Decides what closing the session involves. Repeated requests to close join the one that's already in progress.
     private(set) var closer: SessionCloseCoordinator!
     private var prompts: SessionAlertPrompts!
@@ -95,6 +110,13 @@ public final class VirtualMachineSessionUI: ObservableObject {
 
         $captureKeyboardEvents.dropFirst().removeDuplicates().sink { [weak self] captureKeyboard in
             self?.inputStatusHUD.statusChanged(for: .keyboard, isConnected: captureKeyboard)
+        }
+        .store(in: &cancellables)
+
+        /// A recording ends with the virtual machine's display.
+        controller.$state.map { $0.isRunning || $0.isPaused }.removeDuplicates().sink { [weak self] isShowingDisplay in
+            guard !isShowingDisplay, let self, self.recording != nil else { return }
+            Task { await self.stopRecording() }
         }
         .store(in: &cancellables)
     }

@@ -1,16 +1,43 @@
 import Foundation
 import OSLog
 
+/// What a tool returns: text, and optionally an image for the client to look at.
+struct MCPToolResult: Sendable {
+    struct Image: Sendable {
+        var data: Data
+        var mimeType: String
+    }
+
+    var text: String
+    var image: Image?
+}
+
 /// A tool that the server offers to MCP clients.
 struct MCPTool: Sendable {
     /// Reports progress while a tool runs. The client only receives it if it asked for progress.
     typealias ProgressHandler = @Sendable (_ message: String, _ fraction: Double?) async -> Void
+    typealias Run = @Sendable (_ arguments: JSONValue, _ progress: @escaping ProgressHandler) async throws -> MCPToolResult
 
     var name: String
     var title: String
     var description: String
     var inputSchema: JSONValue
-    var run: @Sendable (_ arguments: JSONValue, _ progress: @escaping ProgressHandler) async throws -> String
+    var run: Run
+
+    init(name: String, title: String, description: String, inputSchema: JSONValue, result run: @escaping Run) {
+        self.name = name
+        self.title = title
+        self.description = description
+        self.inputSchema = inputSchema
+        self.run = run
+    }
+
+    /// A tool that only returns text.
+    init(name: String, title: String, description: String, inputSchema: JSONValue, run: @escaping @Sendable (_ arguments: JSONValue, _ progress: @escaping ProgressHandler) async throws -> String) {
+        self.init(name: name, title: title, description: description, inputSchema: inputSchema) { arguments, progress in
+            MCPToolResult(text: try await run(arguments, progress))
+        }
+    }
 }
 
 /// A Model Context Protocol server that speaks JSON-RPC over standard input and output.
@@ -163,8 +190,12 @@ actor MCPServer {
 
             let result: JSONValue
             do {
-                let text = try await tool.run(arguments, progress)
-                result = ["content": [["type": "text", "text": .string(text)]], "isError": false]
+                let output = try await tool.run(arguments, progress)
+                var content: [JSONValue] = [["type": "text", "text": .string(output.text)]]
+                if let image = output.image {
+                    content.append(["type": "image", "data": .string(image.data.base64EncodedString()), "mimeType": .string(image.mimeType)])
+                }
+                result = ["content": .array(content), "isError": false]
             } catch is CancellationError {
                 result = ["content": [["type": "text", "text": "Cancelled."]], "isError": true]
             } catch {

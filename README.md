@@ -26,6 +26,8 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, and a server th
 - **Linux virtual machines** from Ubuntu, Fedora, Debian and Kali, always downloading the newest image of each release, or from any ARM64 disc image
 - **Windows 11 virtual machines**, installed from Microsoft's Windows 11 ARM64 disc image, optionally without going through Windows Setup at all
 - Clipboard sharing for macOS, Linux and Windows guests, and shared folders and saved sessions for macOS guests
+- Screenshots and screen recordings of any virtual machine, with its sound
+- Clones that run alongside the original and only take up the space of what's changed
 - Importing virtual machines from VirtualBuddy and UTM
 - An [MCP](https://modelcontextprotocol.io) server, so a coding agent can build a Windows virtual machine for you
 
@@ -81,6 +83,8 @@ Then ask for something like "Build a Windows VM with a local user called neil, a
 | `get_windows_vm_status` | Tells whether Windows is installing, starting up or signed in |
 | `list_virtual_machines` | Lists the virtual machines in the library |
 | `start_vm`, `stop_vm` | Starts a virtual machine, or asks it to shut down |
+| `take_screenshot` | Returns a screenshot of a running virtual machine, so the agent can see what's on its display |
+| `clone_vm` | Makes a clone of a virtual machine that can run alongside it |
 | `get_windows_requirements`, `install_windows_requirements` | Checks for, and installs, what Windows virtual machines need |
 
 ## macOS virtual machines
@@ -93,7 +97,24 @@ To mount shared folders without the guest app, run this in the virtual machine's
 mkdir -p ~/Desktop/VirtualBuddyShared && mount -t virtiofs VirtualBuddyShared ~/Desktop/VirtualBuddyShared
 ```
 
-Virtual machines are stored in `~/Library/Application Support/Hypervisaur`. Thanks to APFS, duplicating one in Finder takes almost no extra space, which is a quick way to keep a clean copy to go back to.
+Virtual machines are stored in `~/Library/Application Support/Hypervisaur`.
+
+## Screenshots and recordings
+
+While a virtual machine runs, the camera button in its window's toolbar saves a screenshot of its display, and the record button records its display and sound to a movie. They're saved where macOS saves screenshots, which is your desktop unless you've chosen somewhere else in the Screenshot app.
+
+Hypervisaur needs permission to record the screen for recordings, and for screenshots of macOS and Linux virtual machines; macOS asks for it the first time. Screenshots of Windows virtual machines come straight from the virtual machine's display, at its full resolution.
+
+## Clones
+
+Choose Clone from a virtual machine's menu in the library to make a copy that can run at the same time as the original. The clone gets its own network address and, for macOS, its own serial number. On APFS, the clone's files share their storage with the original's until either of them changes, so a clone takes seconds to make and only uses the space of what's different about it. The clone doesn't depend on the original afterwards: you can delete either one.
+
+Duplicate makes an exact copy instead, with the same identity, which is what a saved session needs to resume. A virtual machine with a saved session can't be cloned; resume it and shut it down first.
+
+Things the operating system in a clone keeps from the original:
+
+- Windows keeps its computer name. This doesn't matter for networking, since each Windows virtual machine has a network of its own, but you can rename it in Settings › System › About.
+- Most Linux distributions keep their machine ID, which some DHCP servers use to give out addresses, so a clone can get the same IP address as the original. Give the clone a new one with `sudo rm /etc/machine-id && sudo systemd-machine-id-setup`, then restart it.
 
 ## Building
 

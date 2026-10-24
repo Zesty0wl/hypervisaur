@@ -195,6 +195,14 @@ struct LibraryItemView: View {
         .help(duplicateHelp)
 
         Button {
+            clone()
+        } label: {
+            Text("Clone")
+        }
+        .disabled(!canClone)
+        .help(cloneHelp)
+
+        Button {
             nameFieldFocus.send(true)
         } label: {
             Text("Rename")
@@ -226,6 +234,29 @@ struct LibraryItemView: View {
             "To keep this point for later, duplicate the saved VM before resuming it. Resuming a copy continues that copy."
         } else {
             "Duplicate this virtual machine."
+        }
+    }
+
+    private var canClone: Bool {
+        guard !isDuplicating, case .success = library.cloneEligibility(of: vm) else { return false }
+        return true
+    }
+
+    private var cloneHelp: String {
+        if case .failure(let error) = library.cloneEligibility(of: vm) {
+            error.localizedDescription
+        } else {
+            "Make a copy that can run at the same time as this virtual machine. The copy shares disk space with the original until either of them changes."
+        }
+    }
+
+    private func clone() {
+        Task {
+            do {
+                try await library.clone(vm)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
         }
     }
 

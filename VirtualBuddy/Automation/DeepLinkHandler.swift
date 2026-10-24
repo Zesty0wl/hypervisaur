@@ -117,10 +117,50 @@ final class DeepLinkHandler {
                     try openVM(named: params.name, options: effectiveOptions)
                 case .stop(let params):
                     try await stopVM(named: params.name)
+                case .screenshot(let params):
+                    guard let replyID = action.replyID else { throw Failure("A screenshot request needs a reply.") }
+                    try await screenshotVM(named: params.name, reply: replyID)
+                case .clone(let params):
+                    try await cloneVM(named: params.name, as: params.cloneName, reply: action.replyID)
                 }
             } catch {
-                let alert = NSAlert(error: error)
-                alert.runModal()
+                if let replyID = action.replyID {
+                    writeReply(.failure(error), for: replyID)
+                } else {
+                    let alert = NSAlert(error: error)
+                    alert.runModal()
+                }
+            }
+        }
+
+        /// Saves a screenshot of a running virtual machine as the reply's attachment.
+        func screenshotVM(named name: String, reply replyID: UUID) async throws {
+            let vm = try getVM(named: name)
+            guard let session = sessionManager.session(for: vm) else {
+                throw Failure("\(name.wrappedInSmartQuotes) isn't running.")
+            }
+
+            let image = try await session.screenshot()
+            try FileManager.default.createDirectory(at: AutomationReply.directoryURL, withIntermediateDirectories: true)
+            try await VMScreenCapture.writePNG(image, to: AutomationReply.attachmentURL(for: replyID, pathExtension: "png"))
+
+            writeReply(.success("Took a \(image.width)×\(image.height) screenshot of \(name.wrappedInSmartQuotes)."), for: replyID)
+        }
+
+        func cloneVM(named name: String, as cloneName: String?, reply replyID: UUID?) async throws {
+            let vm = try getVM(named: name)
+            let clone = try await library.clone(vm, named: cloneName)
+
+            if let replyID {
+                writeReply(.success("Cloned \(name.wrappedInSmartQuotes) as \(clone.name.wrappedInSmartQuotes)."), for: replyID)
+            }
+        }
+
+        private func writeReply(_ reply: AutomationReply, for id: UUID) {
+            do {
+                try reply.write(for: id)
+            } catch {
+                Logger(subsystem: kShellAppSubsystem, category: "DeepLinkHandler").error("Couldn't write reply \(id): \(error, privacy: .public)")
             }
         }
 

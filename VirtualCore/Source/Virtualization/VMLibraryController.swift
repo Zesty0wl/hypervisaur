@@ -474,6 +474,38 @@ public extension VMLibraryController {
     /// The virtual machine can't be started, resumed, discarded, renamed or trashed while it's being copied.
     @discardableResult
     func duplicate(_ vm: VBVirtualMachine) async throws -> VBVirtualMachine {
+        try await copy(vm, to: try urlForRenaming(vm, to: "Copy of " + vm.name), guestIdentity: .original)
+    }
+
+    /// Whether a virtual machine can be cloned, and why not if it can't.
+    func cloneEligibility(of vm: VBVirtualMachine) -> Result<Void, Error> {
+        if isExecuting(vm) {
+            return .failure(Failure("\"\(vm.name)\" is running. Shut it down before cloning it."))
+        }
+        return Result { try VMBundleDuplicator.validateNewGuestIdentity(for: vm) }
+    }
+
+    /// Makes a copy of a virtual machine that can run at the same time as the original.
+    ///
+    /// The copy has its own network addresses and, for macOS, its own machine identifier. On APFS, its files share their storage
+    /// with the original's until either of them changes, so it only takes up the space of what's different about it.
+    /// Virtual machines with a saved session can't be cloned, because a saved session can only resume with the identity it was saved with.
+    ///
+    /// - Parameter name: The clone's name. Defaults to "Clone of" the original's name, numbered if that's taken.
+    @discardableResult
+    func clone(_ vm: VBVirtualMachine, named name: String? = nil) async throws -> VBVirtualMachine {
+        try cloneEligibility(of: vm).get()
+
+        let url = if let name {
+            try urlForRenaming(vm, to: name)
+        } else {
+            availableURL(for: vm, named: "Clone of " + vm.name)
+        }
+
+        return try await copy(vm, to: url, guestIdentity: .new)
+    }
+
+    private func copy(_ vm: VBVirtualMachine, to copyURL: URL, guestIdentity: VMBundleDuplicator.GuestIdentity) async throws -> VBVirtualMachine {
         guard !isBeingDuplicated(vm) else {
             throw Failure("\"\(vm.name)\" is already being duplicated.")
         }
@@ -482,7 +514,6 @@ public extension VMLibraryController {
         duplicatingMachineIdentifiers.insert(vm.id)
         defer { duplicatingMachineIdentifiers.remove(vm.id) }
 
-        let copyURL = try urlForRenaming(vm, to: "Copy of " + vm.name)
         let sourceURL = vm.bundleURL
 
         func copy() async throws -> VBVirtualMachine {
@@ -492,7 +523,7 @@ public extension VMLibraryController {
             }
 
             return try await performOffMainActor {
-                try VMBundleDuplicator().duplicate(bundleAt: sourceURL, to: copyURL)
+                try VMBundleDuplicator().duplicate(bundleAt: sourceURL, to: copyURL, guestIdentity: guestIdentity)
             }
         }
 
@@ -552,7 +583,24 @@ public extension VMLibraryController {
 
         return newURL
     }
-    
+
+    /// The location for a new virtual machine next to an existing one, with a number after the name if it's taken.
+    private func availableURL(for vm: VBVirtualMachine, named name: String) -> URL {
+        let directoryURL = vm.bundleURL.deletingLastPathComponent()
+
+        func url(_ name: String) -> URL {
+            directoryURL.appendingPathComponent(name).appendingPathExtension(VBVirtualMachine.bundleExtension)
+        }
+
+        var candidate = url(name)
+        var number = 2
+        while fileManager.fileExists(atPath: candidate.path) {
+            candidate = url("\(name) \(number)")
+            number += 1
+        }
+        return candidate
+    }
+
 }
 
 extension NSWorkspace: @retroactive @unchecked Sendable { }

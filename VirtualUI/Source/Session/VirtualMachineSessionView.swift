@@ -18,6 +18,9 @@ public struct VirtualMachineSessionView: View {
     @Environment(\.cocoaWindow)
     private var window
 
+    /// The screenshot or recording that was saved most recently, while the banner about it shows.
+    @State private var savedCaptureURL: URL?
+
     /// ``VirtualMachineSessionView`` should only be initialized by ``VirtualMachineSessionUIManager``.
     internal init() { }
 
@@ -47,6 +50,21 @@ public struct VirtualMachineSessionView: View {
                 presenter: ui.inputStatusHUD,
                 configuration: controller.virtualMachineModel.configuration
             )
+
+            if let savedCaptureURL {
+                VMCapturedFileBanner(url: savedCaptureURL)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: savedCaptureURL)
+        .onReceive(ui.capturedFileSaved) { url in
+            savedCaptureURL = url
+        }
+        .task(id: savedCaptureURL) {
+            guard savedCaptureURL != nil else { return }
+            try? await Task.sleep(for: .seconds(5))
+            savedCaptureURL = nil
         }
         .frame(minWidth: 400, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
         .environmentObject(controller)
@@ -94,6 +112,14 @@ public struct VirtualMachineSessionView: View {
                     if #available(macOS 26, *) {
                         ToolbarSpacer(.fixed)
                     }
+                }
+
+                ToolbarItemGroup(placement: .primaryAction) {
+                    VirtualMachineCaptureControls()
+                }
+
+                if #available(macOS 26, *) {
+                    ToolbarSpacer(.fixed)
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -152,6 +178,7 @@ public struct VirtualMachineSessionView: View {
             vmView(with: vm) { [weak ui] event in
                 ui?.handleInputToggleHold(event)
             }
+            .background(VMDisplayViewReader(session: ui))
         case .paused(let vm):
             pausedView(with: vm) {
                 circularStartButton

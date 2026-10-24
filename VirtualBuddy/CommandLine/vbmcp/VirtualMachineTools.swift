@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import VirtualCore
 
 /// The tools that `vbmcp` offers for creating and running virtual machines.
@@ -7,14 +8,15 @@ import VirtualCore
 /// Starting and stopping go through the app's URL scheme, so the app asks the user once whether to allow it.
 enum VirtualMachineTools {
     static var all: [MCPTool] {
-        [listVirtualMachines, getStatus, getWindowsRequirements, installWindowsRequirements, createWindowsVM, waitForWindowsVM, startVM, stopVM]
+        [listVirtualMachines, getStatus, getWindowsRequirements, installWindowsRequirements, createWindowsVM, waitForWindowsVM, startVM, stopVM, takeScreenshot, cloneVM]
     }
 
     static let instructions = """
     Creates and runs Windows 11 virtual machines in Hypervisaur on this Mac. create_windows_vm installs Windows without \
     any interaction and signs in to a local account, which takes about 10 minutes; call wait_for_windows_vm afterwards \
-    to wait until the desktop is ready. The first time Hypervisaur is asked to start a virtual machine, it asks the user \
-    to allow it.
+    to wait until the desktop is ready. take_screenshot shows what's on a running virtual machine's display, and clone_vm \
+    makes a copy of a virtual machine that can run alongside it. The first time Hypervisaur is asked to do something, \
+    it asks the user to allow it.
     """
 
     // MARK: - Tools
@@ -130,6 +132,45 @@ enum VirtualMachineTools {
         }
     )
 
+    private static let takeScreenshot = MCPTool(
+        name: "take_screenshot",
+        title: "Take Screenshot",
+        description: "Takes a screenshot of a running virtual machine's display and returns it as an image.",
+        inputSchema: schema([
+            "name": property("string", "The name of the virtual machine."),
+            "max_size": property("integer", "The most pixels the image may have on its longer side; larger screenshots are scaled down. Defaults to \(Screenshots.defaultMaximumSize)."),
+            "save_path": property("string", "A path to also save the screenshot to as a PNG file, at its full size."),
+        ], required: ["name"]),
+        result: { arguments, progress in
+            let model = try Library.machine(named: try arguments.requiredString("name"))
+            return try await Screenshots.take(
+                of: model,
+                maximumSize: arguments.integer("max_size") ?? Screenshots.defaultMaximumSize,
+                savingTo: arguments.string("save_path").map { URL(filePath: ($0 as NSString).expandingTildeInPath) },
+                progress: progress
+            )
+        }
+    )
+
+    private static let cloneVM = MCPTool(
+        name: "clone_vm",
+        title: "Clone Virtual Machine",
+        description: """
+        Makes a copy of a virtual machine that can run at the same time as the original, with its own network address \
+        and, for macOS, its own serial number. The copy shares disk space with the original until either of them changes, \
+        so it's quick to make and only takes up the space of what's different. The virtual machine must be shut down, \
+        without a saved session.
+        """,
+        inputSchema: schema([
+            "name": property("string", "The name of the virtual machine to clone."),
+            "clone_name": property("string", "The name of the copy. Defaults to \"Clone of\" the original's name, numbered if that's taken."),
+        ], required: ["name"]),
+        run: { arguments, progress in
+            let model = try Library.machine(named: try arguments.requiredString("name"))
+            return try await clone(model, as: arguments.string("clone_name"), progress: progress)
+        }
+    )
+
     // MARK: - Creating
 
     private static func createWindowsVirtualMachine(arguments: JSONValue, progress: @escaping MCPTool.ProgressHandler) async throws -> String {
@@ -198,6 +239,27 @@ enum VirtualMachineTools {
         }
 
         throw Failure("Hypervisaur hasn’t started \(model.name). If Hypervisaur is asking whether to allow it to be controlled, allow it, then call start_vm again.")
+    }
+
+    /// Cloning on a volume that isn't APFS copies everything, which takes a while for a large disk.
+    private static let cloneTimeout = Duration.seconds(30 * 60)
+
+    private static func clone(_ model: VBVirtualMachine, as cloneName: String?, progress: @escaping MCPTool.ProgressHandler) async throws -> String {
+        let replyID = UUID()
+        var parameters = ["reply": replyID.uuidString]
+        if let cloneName {
+            parameters["cloneName"] = cloneName
+        }
+
+        try await App.open("clone", name: model.name, parameters: parameters)
+        await progress("Waiting for Hypervisaur to clone \(model.name)", nil)
+
+        let reply = try await AutomationReply.wait(
+            for: replyID,
+            timeout: cloneTimeout,
+            timeoutMessage: "Hypervisaur hasn’t cloned \(model.name). If Hypervisaur is asking whether to allow it to be controlled, allow it, then call clone_vm again."
+        )
+        return reply.message ?? "Cloned \(model.name)."
     }
 
     private static let stoppedGracePeriod = Duration.seconds(30)
@@ -429,11 +491,11 @@ private enum App {
     /// Sends a request to this copy of the app, which launches it if needed. The app comes to the front, since it may need
     /// to ask the user whether to allow the request.
     @MainActor
-    static func open(_ action: String, name: String) async throws {
+    static func open(_ action: String, name: String, parameters: [String: String] = [:]) async throws {
         var components = URLComponents()
         components.scheme = "hypervisaur"
         components.host = action
-        components.queryItems = [URLQueryItem(name: "name", value: name)]
+        components.queryItems = [URLQueryItem(name: "name", value: name)] + parameters.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
 
         guard let url = components.url else {
             throw Failure("Couldn’t make a request for “\(name)”.")
@@ -443,6 +505,76 @@ private enum App {
         configuration.activates = true
 
         _ = try await NSWorkspace.shared.open([url], withApplicationAt: Bundle.main.bundleURL, configuration: configuration)
+    }
+}
+
+// MARK: - Screenshots
+
+private enum Screenshots {
+    /// Claude looks at images up to this size without scaling them down.
+    static let defaultMaximumSize = 1568
+
+    /// How long to wait for the app, which includes the time the user may take to allow it, and to allow it to record the screen.
+    static let timeout = Duration.seconds(120)
+
+    static func take(of model: VBVirtualMachine, maximumSize: Int, savingTo saveURL: URL?, progress: @escaping MCPTool.ProgressHandler) async throws -> MCPToolResult {
+        let replyID = UUID()
+        let attachmentURL = AutomationReply.attachmentURL(for: replyID, pathExtension: "png")
+        defer { try? FileManager.default.removeItem(at: attachmentURL) }
+
+        try await App.open("screenshot", name: model.name, parameters: ["reply": replyID.uuidString])
+        await progress("Waiting for Hypervisaur to take a screenshot of \(model.name)", nil)
+
+        let reply = try await AutomationReply.wait(
+            for: replyID,
+            timeout: timeout,
+            timeoutMessage: "Hypervisaur hasn’t taken a screenshot of \(model.name). If Hypervisaur is asking whether to allow it to be controlled or to record the screen, allow it, then call take_screenshot again."
+        )
+
+        var text = reply.message ?? "Took a screenshot of \(model.name)."
+
+        if let saveURL {
+            try? FileManager.default.removeItem(at: saveURL)
+            try FileManager.default.copyItem(at: attachmentURL, to: saveURL)
+            text += " Saved it to \(saveURL.path)."
+        }
+
+        let data = try scaledPNG(at: attachmentURL, maximumSize: max(maximumSize, 64))
+        return MCPToolResult(text: text, image: .init(data: data, mimeType: "image/png"))
+    }
+
+    /// The image as a PNG that's no larger than the maximum size on its longer side.
+    private static func scaledPNG(at url: URL, maximumSize: Int) throws -> Data {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int
+        else {
+            throw Failure("The screenshot couldn’t be read.")
+        }
+
+        guard max(width, height) > maximumSize else {
+            return try Data(contentsOf: url)
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maximumSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            throw Failure("The screenshot couldn’t be scaled down.")
+        }
+
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
+            throw Failure("The screenshot couldn’t be compressed.")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw Failure("The screenshot couldn’t be compressed.")
+        }
+        return data as Data
     }
 }
 
