@@ -7,7 +7,33 @@ enum HostDiskImage {
 
     /// Creates a sparse raw disk image with a single FAT32 volume, lets `populate` write to the mounted volume, then unmounts it.
     /// The image is removed if anything fails.
+    ///
+    /// Security software can keep a new volume busy so that it has to be forcibly unmounted, which can lose what was written
+    /// to it last. So once the image has been unmounted, it's checked against what was written, and created again if it differs.
     static func createFATDisk(at url: URL, size: Int64, volumeName: String, populate: (URL) async throws -> Void) async throws {
+        let attempts = 3
+
+        for attempt in 1...attempts {
+            let written = try await createFATDiskOnce(at: url, size: size, volumeName: volumeName, populate: populate)
+
+            let problems: [String]
+            do {
+                problems = try await differences(from: written, inImageAt: url)
+            } catch {
+                try? FileManager.default.removeItem(at: url)
+                throw error
+            }
+
+            guard !problems.isEmpty else { return }
+
+            logger.error("\(url.lastPathComponent, privacy: .public) differs from what was written to it (attempt \(attempt)): \(problems.prefix(10).joined(separator: ", "), privacy: .public)")
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        throw Failure("Hypervisaur couldn’t write \(url.lastPathComponent) completely. Some security software stops disks from being written; check that it allows Hypervisaur to create disk images, then try again.")
+    }
+
+    private static func createFATDiskOnce(at url: URL, size: Int64, volumeName: String, populate: (URL) async throws -> Void) async throws -> [String: VolumeItem] {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
@@ -35,9 +61,14 @@ enum HostDiskImage {
 
             removeMacMetadata(from: volumeURL)
 
+            let written = try contents(of: volumeURL)
+            synchronize(volumeURL)
+
             try await unmount(device)
             detach(device)
             isDeviceAttached = false
+
+            return written
         } catch {
             try? FileManager.default.removeItem(at: url)
             throw error
@@ -119,11 +150,9 @@ enum HostDiskImage {
         return URL(filePath: path, directoryHint: .isDirectory)
     }
 
-    /// Security software commonly scans new volumes and keeps them busy for a moment, so the volume is forcibly unmounted
-    /// if it can't be unmounted after a few attempts. Everything has been written by then.
+    /// Security software commonly scans new volumes and keeps them busy, sometimes for as long as they're mounted, so the volume
+    /// is forcibly unmounted if it can't be unmounted after a few attempts. It's been synchronized by then.
     private static func unmount(_ device: String) async throws {
-        try await HostCommand.run("/bin/sync", [])
-
         for attempt in 1...5 {
             do {
                 try await HostCommand.run("/usr/sbin/diskutil", ["unmountDisk", device])
@@ -135,6 +164,61 @@ enum HostDiskImage {
         }
 
         try await HostCommand.run("/usr/sbin/diskutil", ["unmountDisk", "force", device])
+    }
+
+    // MARK: - Checking
+
+    /// A file or folder on a volume, which is compared by its size since files are copied without being changed.
+    private struct VolumeItem: Equatable {
+        var isDirectory: Bool
+        var size: UInt64
+    }
+
+    /// Folders that macOS writes to volumes while they're mounted, which change when they're unmounted.
+    private static let systemFolderNames: Set<String> = [".fseventsd", ".Spotlight-V100", ".Trashes"]
+
+    /// Everything on a volume by its path, apart from what macOS keeps there for itself.
+    private static func contents(of volumeURL: URL) throws -> [String: VolumeItem] {
+        guard let enumerator = FileManager.default.enumerator(atPath: volumeURL.path) else {
+            throw Failure("Hypervisaur couldn’t read the disk image it created.")
+        }
+
+        var contents = [String: VolumeItem]()
+        while let path = enumerator.nextObject() as? String {
+            if enumerator.level == 1, systemFolderNames.contains(path) {
+                enumerator.skipDescendants()
+                continue
+            }
+
+            let attributes = enumerator.fileAttributes ?? [:]
+            let isDirectory = attributes[.type] as? FileAttributeType == .typeDirectory
+            contents[path] = VolumeItem(isDirectory: isDirectory, size: isDirectory ? 0 : (attributes[.size] as? UInt64 ?? 0))
+        }
+        return contents
+    }
+
+    /// Describes what's missing or different in the image, compared with what was written to it.
+    private static func differences(from written: [String: VolumeItem], inImageAt url: URL) async throws -> [String] {
+        let mountPoint = try await mountReadOnly(url)
+        defer { detach(mountPoint.path) }
+
+        let found = try contents(of: mountPoint)
+
+        return written.keys.sorted().compactMap { path in
+            switch found[path] {
+            case nil: "\(path) is missing"
+            case written[path]: nil
+            case .some: "\(path) is different"
+            }
+        }
+    }
+
+    /// Writes everything on the volume to the disk image and waits for it to finish, so that nothing is lost if the volume
+    /// has to be forcibly unmounted. `sync` only schedules the writes.
+    private static func synchronize(_ volumeURL: URL) {
+        if sync_volume_np(volumeURL.path, SYNC_VOLUME_FULLSYNC | SYNC_VOLUME_WAIT) != 0 {
+            logger.error("Failed to synchronize \(volumeURL.path, privacy: .public): \(String(cString: strerror(errno)), privacy: .public)")
+        }
     }
 
     // MARK: - Mac Metadata
