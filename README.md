@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/035a9ff6-a47a-486c-ae10-5fce98ac1a42
-
 <p align="center">
   <img src="./assets/AppIcon/Hypervisaur-2048.png" width="160" alt="The Hypervisaur app icon, a T. rex head on a teal background">
 </p>
@@ -10,9 +6,60 @@ https://github.com/user-attachments/assets/035a9ff6-a47a-486c-ae10-5fce98ac1a42
 
 <p align="center">Run macOS, Linux and Windows 11 virtual machines on Apple silicon Macs.</p>
 
+https://github.com/user-attachments/assets/035a9ff6-a47a-486c-ae10-5fce98ac1a42
+
+<p align="center"><sub>Starting Windows 11, following its logs, opening a shell in it from Terminal, and dragging files in and out. <a href="./assets/Video/Hypervisaur.mp4">Download the video</a></sub></p>
+
+## Highlights
+
+### Windows 11 in a few clicks
+
+Hypervisaur checks for everything Windows needs and installs what's missing with Homebrew in one click. Then choose Microsoft's Windows 11 disc image, and with **Set Up Windows Automatically**, Windows installs without asking anything and signs in to a local account by itself. See [Windows virtual machines](#windows-virtual-machines).
+
 <p align="center">
-  <img src="./assets/Screenshots/Windows.png" width="800" alt="Windows 11 at its desktop in a Hypervisaur window">
+  <img src="./assets/Screenshots/WindowsRequirements.png" width="400" alt="The Windows Requirements screen, with QEMU, swtpm, wimlib and the Windows drivers installed">
+  <img src="./assets/Screenshots/WindowsSetup.png" width="400" alt="The setup screen with Set Up Windows Automatically turned on, a user name and an optional password">
 </p>
+
+### A shell in any virtual machine
+
+The terminal button in a virtual machine's toolbar opens a shell in it in Terminal: PowerShell in Windows, a root shell in Linux and your own shell in macOS. It goes through the Hypervisaur agent rather than the network or SSH, so there's nothing to set up in the virtual machine's network, and `hvctl` does the same from your own scripts. See [Shells, commands and logs](#shells-commands-and-logs).
+
+<p align="center">
+  <img src="./assets/Screenshots/Shell.png" width="800" alt="A Terminal window with a PowerShell session in a Windows 11 virtual machine, in front of the virtual machine's window">
+</p>
+
+### Drag and drop files
+
+Drag files and folders onto a virtual machine's window to copy them to its desktop, and out of macOS and Windows virtual machines onto your Mac. Copies run at about 100 MB/s with Windows, well over 170 MB/s with macOS and over 300 MB/s with Linux, with their progress, speed and time left at the bottom of the window. See [Copying files](#copying-files).
+
+<p align="center">
+  <img src="./assets/Screenshots/DragAndDrop.png" width="720" alt="A panel at the bottom of a Windows virtual machine's window showing a 4.29 GB file being copied at 101.3 MB/s, with about 35 seconds left">
+</p>
+
+### Logs as they're logged
+
+The logs button follows the virtual machine's logs: the event logs in Windows, the systemd journal in Linux and the unified log in macOS. You can filter, pause and copy them.
+
+<p align="center">
+  <img src="./assets/Screenshots/Logs.png" width="720" alt="A Hypervisaur window following a macOS virtual machine's logs as they're logged">
+</p>
+
+### Know when the agent is ready
+
+Shells, logs and copying files go through the Hypervisaur agent in the virtual machine. The dinosaur in the toolbar shows whether it's connected; click it to see which system it's running on, or what to do if it isn't connected yet.
+
+<p align="center">
+  <img src="./assets/Screenshots/AgentStatus.png" width="662" alt="The dinosaur button's popover saying the Hypervisaur agent is connected to Windows 11 (10.0.26300) ARM64">
+</p>
+
+### Screenshots and screen recordings
+
+The camera and record buttons save a screenshot of the virtual machine's display, or a movie of it with its sound, where macOS saves your screenshots. See [Screenshots and recordings](#screenshots-and-recordings).
+
+### Let a coding agent do it
+
+Hypervisaur includes an [MCP](https://modelcontextprotocol.io) server, so you can ask a coding agent such as Claude Code to "build a Windows VM with a local user called neil" and it creates the virtual machine, installs Windows and waits until it's at the desktop. It can then run commands in it, read its logs and look at its screen. See [Using Hypervisaur from a coding agent](#using-hypervisaur-from-a-coding-agent).
 
 ## About this project
 
@@ -52,6 +99,10 @@ Download the installer package from the latest release on the [Releases](../../r
 Hypervisaur checks GitHub once a day for a new release, and tells you when there is one. To update, download the new installer package and open it; your virtual machines stay as they are. You can also choose Hypervisaur › Check for Updates, or turn the daily check off in Settings.
 
 ## Windows virtual machines
+
+<p align="center">
+  <img src="./assets/Screenshots/Windows.png" width="800" alt="Windows 11 at its desktop in a Hypervisaur window">
+</p>
 
 Choose Windows when creating a virtual machine. Hypervisaur first checks for what Windows needs on your Mac, and installs anything that's missing with a single click:
 
@@ -119,10 +170,6 @@ Hypervisaur needs permission to record the screen for recordings, and for screen
 ## Shells, commands and logs
 
 While a virtual machine runs, the terminal button in its window's toolbar opens a shell in it in Terminal, and the logs button opens a window that shows its logs as they're logged, which you can filter, pause and copy. Both are in the Guest menu too, as Open Shell (⌥⌘T) and Show Logs (⌥⌘L).
-
-<p align="center">
-  <img src="./assets/Screenshots/Logs.png" width="720" alt="A Hypervisaur window following a macOS virtual machine's logs as they're logged">
-</p>
 
 They work through the Hypervisaur agent in the virtual machine, which talks to Hypervisaur over a channel of its own rather than the network. The dinosaur in the window's toolbar shows whether the agent is connected; click it for what to do if it isn't.
 
