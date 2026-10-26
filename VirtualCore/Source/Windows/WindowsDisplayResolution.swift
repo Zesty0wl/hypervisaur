@@ -1,6 +1,39 @@
 import Foundation
 import OSLog
 
+/// A resolution a guest's display can be switched to.
+public struct GuestDisplayResolution: Hashable, Comparable, Sendable {
+    public var width: Int
+    public var height: Int
+
+    public init(width: Int, height: Int) {
+        self.width = width
+        self.height = height
+    }
+
+    public static func < (lhs: Self, rhs: Self) -> Bool {
+        (lhs.width, lhs.height) < (rhs.width, rhs.height)
+    }
+
+    /// Parses `1920x1080`.
+    init?(_ text: some StringProtocol) {
+        let parts = text.split(separator: "x")
+        guard parts.count == 2, let width = Int(parts[0]), let height = Int(parts[1]), width > 0, height > 0 else { return nil }
+        self.init(width: width, height: height)
+    }
+}
+
+/// The resolutions Windows' display driver offers, and the one it's using.
+public struct GuestDisplayModes: Hashable, Sendable {
+    public var current: GuestDisplayResolution?
+    public var available: [GuestDisplayResolution]
+
+    public init(current: GuestDisplayResolution?, available: [GuestDisplayResolution]) {
+        self.current = current
+        self.available = available
+    }
+}
+
 /// Switches Windows to the resolution of a display it was started with in place of its own, such as for a full-screen start.
 ///
 /// Windows treats each resolution that the display device offers as a different monitor. A monitor it hasn't seen before
@@ -41,10 +74,12 @@ final class WindowsDisplayResolution {
 
     /// Switches the resolution once the agent is running and somebody has signed in.
     /// - Parameter connection: The connection to the agent, while there's one.
-    func apply(using connection: @escaping @MainActor () -> GuestAgentConnection?) {
+    /// - Parameter onSwitched: Called once Windows has been switched.
+    func apply(using connection: @escaping @MainActor () -> GuestAgentConnection?, onSwitched: @escaping @MainActor () -> Void) {
         task?.cancel()
         task = Task { [weak self] in
-            await self?.run(using: connection)
+            guard await self?.run(using: connection) == true else { return }
+            onSwitched()
         }
     }
 
@@ -53,7 +88,8 @@ final class WindowsDisplayResolution {
         task = nil
     }
 
-    private func run(using connection: @MainActor () -> GuestAgentConnection?) async {
+    /// - Returns: Whether Windows was switched.
+    private func run(using connection: @MainActor () -> GuestAgentConnection?) async -> Bool {
         var failures = 0
 
         while !Task.isCancelled {
@@ -64,10 +100,10 @@ final class WindowsDisplayResolution {
                     switch Outcome(rawValue: result.status) {
                     case .switched:
                         logger.notice("Switched Windows to \(self.width)x\(self.height)")
-                        return
+                        return true
                     case .alreadySet:
                         logger.info("Windows is already at \(self.width)x\(self.height)")
-                        return
+                        return false
                     case .nobodySignedIn:
                         logger.debug("Waiting for somebody to sign in to switch Windows to \(self.width)x\(self.height)")
                     case .didNotSwitch, nil:
@@ -81,12 +117,52 @@ final class WindowsDisplayResolution {
 
                 guard failures < Self.maximumFailures else {
                     logger.error("Giving up on switching Windows to \(self.width)x\(self.height)")
-                    return
+                    return false
                 }
             }
 
             try? await Task.sleep(for: Self.retryInterval)
         }
+
+        return false
+    }
+
+    /// Switches Windows to a resolution now, such as when it's chosen from the Guest menu.
+    static func switchResolution(to resolution: GuestDisplayResolution, over connection: GuestAgentConnection) async throws {
+        let result = try await connection.run(command(width: resolution.width, height: resolution.height), timeout: .seconds(90))
+
+        switch Outcome(rawValue: result.status) {
+        case .switched, .alreadySet:
+            return
+        case .nobodySignedIn:
+            throw Failure("Sign in to Windows to change its resolution.")
+        case .didNotSwitch, nil:
+            throw Failure("Windows didn’t switch to \(resolution.width) by \(resolution.height). \(String(decoding: result.errorOutput, as: UTF8.self))")
+        }
+    }
+
+    /// The resolutions Windows' display driver offers, and the one it's using. Asking doesn't need anybody to have signed in.
+    static func modes(over connection: GuestAgentConnection) async throws -> GuestDisplayModes {
+        let result = try await connection.run(modesCommand, timeout: .seconds(60))
+        guard result.status == 0 else {
+            throw Failure("Windows didn’t say which resolutions it offers. \(String(decoding: result.errorOutput, as: UTF8.self))")
+        }
+        return parseModes(String(decoding: result.output, as: UTF8.self))
+    }
+
+    /// Prints the current resolution on the first line, then each one the driver offers.
+    static let modesCommand = """
+        $ErrorActionPreference = 'Stop'
+        $controller = Get-CimInstance Win32_VideoController | Select-Object -First 1
+        "$($controller.CurrentHorizontalResolution)x$($controller.CurrentVerticalResolution)"
+        Get-CimInstance CIM_VideoControllerResolution | ForEach-Object { "$($_.HorizontalResolution)x$($_.VerticalResolution)" } | Sort-Object -Unique
+        """
+
+    static func parseModes(_ output: String) -> GuestDisplayModes {
+        let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        let current = lines.first.flatMap(GuestDisplayResolution.init)
+        let available = Set(lines.dropFirst().compactMap(GuestDisplayResolution.init)).sorted()
+        return GuestDisplayModes(current: current, available: available)
     }
 
     /// What the agent runs, as the system, in PowerShell. Its exit status is one of the ``Outcome``s.

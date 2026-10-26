@@ -58,6 +58,9 @@ public final class QEMUVirtualMachine: ObservableObject {
     /// Windows Setup runs from the installer, which is only attached until Windows has been installed.
     var isInstallerAttached: Bool { installDiskURL != nil }
 
+    /// Windows can only switch resolutions with the virtio GPU. The framebuffer it uses before its drivers are installed has a fixed size.
+    var canSwitchResolution: Bool { displayAdapter == .virtioGPU }
+
     init(model: VBVirtualMachine, installDiskURL: URL?, driversDiskURL: URL?, displayAdapter: QEMULaunchConfiguration.DisplayAdapter) {
         self.model = model
         self.installDiskURL = installDiskURL

@@ -269,8 +269,21 @@ public final class VMController: ObservableObject {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] info in
-                self?.guestAgentInfo = info
+                guard let self else { return }
+                self.guestAgentInfo = info
+
+                if info == nil {
+                    self.guestDisplayModes = nil
+                } else {
+                    Task { await self.loadGuestDisplayModes() }
+                }
             }
+
+        if let qemuInstance = newInstance as? QEMUInstance {
+            qemuInstance.onGuestResolutionChange = { [weak self] in
+                Task { await self?.loadGuestDisplayModes() }
+            }
+        }
     }
 
     private func runtime(of instance: any VMEngineInstance) throws -> VMRuntime {
@@ -306,6 +319,39 @@ public final class VMController: ObservableObject {
     /// What the Hypervisaur agent in the guest says about itself, or `nil` while it isn't connected.
     @Published
     public private(set) var guestAgentInfo: GuestAgentInfo?
+
+    // MARK: Guest Display
+
+    /// The resolutions a Windows guest can be switched to, and the one it's using, while it can be switched.
+    @Published
+    public private(set) var guestDisplayModes: GuestDisplayModes?
+
+    /// Asks Windows which resolutions it offers, once its agent is running.
+    private func loadGuestDisplayModes() async {
+        guard let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent else {
+            guestDisplayModes = nil
+            return
+        }
+
+        do {
+            let modes = try await WindowsDisplayResolution.modes(over: agent)
+            guard instance === qemuInstance else { return }
+            guestDisplayModes = modes
+        } catch {
+            logger.notice("Couldn't find out which resolutions Windows offers: \(error, privacy: .public)")
+        }
+    }
+
+    /// Switches a Windows guest to another resolution, which Windows then remembers.
+    public func switchGuestResolution(to resolution: GuestDisplayResolution) async throws {
+        guard let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent else {
+            throw Failure("The resolution of “\(virtualMachineModel.name)” can’t be changed right now.")
+        }
+
+        try await WindowsDisplayResolution.switchResolution(to: resolution, over: agent)
+
+        guestDisplayModes?.current = resolution
+    }
 
     /// The status of the Hypervisaur agent in a Windows or Linux guest. `nil` for macOS guests, whose agent is part of the guest app.
     public var guestAgentStatus: GuestAgentStatus? {
@@ -380,6 +426,7 @@ public final class VMController: ObservableObject {
         guard state.isRunning || state.isPaused || state.isStarting || state.isRestoring else { return }
 
         state = .stopped(error)
+        guestDisplayModes = nil
 
         Task { await finishRestoreIfPending() }
     }

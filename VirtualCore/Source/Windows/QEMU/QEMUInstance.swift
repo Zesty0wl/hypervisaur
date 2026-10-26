@@ -31,6 +31,12 @@ final class QEMUInstance: VMEngineInstance {
     /// Switches Windows to the display it was started with in place of its own. See ``WindowsDisplayResolution``.
     private var displayResolution: WindowsDisplayResolution?
 
+    /// Called when Windows has been switched to a different resolution by itself, such as after a full-screen start.
+    var onGuestResolutionChange: (() -> Void)?
+
+    /// Whether Windows can be switched to another resolution. See ``QEMUVirtualMachine/canSwitchResolution``.
+    var canSwitchResolution: Bool { machine?.canSwitchResolution == true }
+
     private let logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "QEMUInstance")
 
     init(with vm: VBVirtualMachine, library: VMLibraryController, onVMStop: @escaping (Error?) -> Void) {
@@ -75,6 +81,8 @@ final class QEMUInstance: VMEngineInstance {
             resolution.apply { [weak self, weak machine] in
                 guard let machine, self?.machine === machine else { return nil }
                 return machine.guestAgentConnection
+            } onSwitched: { [weak self] in
+                self?.onGuestResolutionChange?()
             }
         }
     }
