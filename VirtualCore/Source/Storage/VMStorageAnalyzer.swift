@@ -10,6 +10,7 @@ public struct VMStorageAnalyzer: Sendable {
         public var bundleURL: URL
         public var systemType: VBGuestType
         public var copiedFrom: VBVirtualMachine.Metadata.CopySource?
+        public var creationDate: Date
         /// The paths of the disk images inside the bundle, relative to it.
         public var diskPaths: Set<String>
 
@@ -20,6 +21,7 @@ public struct VMStorageAnalyzer: Sendable {
             bundleURL = vm.bundleURL
             systemType = vm.configuration.systemType
             copiedFrom = vm.metadata.copiedFrom
+            creationDate = vm.bundleURL.creationDate
             diskPaths = Set(vm.configuration.hardware.storageDevices.compactMap { device -> String? in
                 guard case .managedImage(let image) = device.backing else { return nil }
                 return Self.relativePath(of: vm.diskImageURL(for: image), in: vm.bundleURL)
@@ -119,6 +121,7 @@ public struct VMStorageAnalyzer: Sendable {
             bundleURL: input.bundleURL,
             systemType: input.systemType,
             copiedFrom: input.copiedFrom,
+            creationDate: input.creationDate,
             files: files,
             size: space.size,
             freedIfDeleted: space.freedIfDeleted
@@ -204,11 +207,17 @@ public struct VMStorageAnalyzer: Sendable {
                 for child in children(of: machine) { add(child, depth: depth + 1) }
             }
 
+            /// The virtual machine that came first leads the family. The others that weren't copied from a virtual machine in the
+            /// family share data with it without a record of where they came from, so they're likely copies of it, and come under it.
             let roots = group
                 .filter { machine in machine.copiedFrom.map { !uuids.contains($0.uuid) } ?? true }
-                .sorted { $0.size > $1.size }
+                .sorted { ($0.creationDate, $1.size) < ($1.creationDate, $0.size) }
 
-            for machine in roots { add(machine, depth: 0) }
+            if let first = roots.first {
+                members.append(.init(machine: first, depth: 0))
+                for machine in roots.dropFirst() { add(machine, depth: 1) }
+                for child in children(of: first) { add(child, depth: 1) }
+            }
             /// Copies of copies whose chain leads back into the family in a loop, which can only happen with damaged metadata.
             for machine in group { add(machine, depth: 0) }
 

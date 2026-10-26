@@ -109,6 +109,11 @@ final class VMStorageAnalyzerTests {
         #expect(report.machine(withUUID: copy.uuid)?.sharesStorageWith == [original.uuid])
         #expect(report.machine(withUUID: unrelated.uuid)?.sharesStorageWith == [])
         #expect(report.families.count == 2)
+
+        /// Without a record of where the copy came from, the virtual machine that was created first leads the family.
+        let family = try #require(report.families.first { $0.members.count == 2 })
+        #expect(family.members.map(\.machine.uuid) == [original.uuid, copy.uuid])
+        #expect(family.members.map(\.depth) == [0, 1])
     }
 
     @Test func aSavedSessionsCopiesOfTheDisksAreFreedWithItsVirtualMachine() throws {

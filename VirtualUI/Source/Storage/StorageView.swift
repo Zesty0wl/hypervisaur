@@ -308,7 +308,12 @@ private struct MachineStorageRow: View {
     private var lineageCaption: String? {
         guard let source = machine.copiedFrom else {
             let copies = report.machines.filter { $0.copiedFrom?.uuid == machine.uuid }.count
-            return copies > 0 ? "Original of \(copies) \(copies == 1 ? "copy" : "copies")" : nil
+            if copies > 0 { return "Original of \(copies) \(copies == 1 ? "copy" : "copies")" }
+
+            /// Copies made before Hypervisaur recorded where they came from are only known from the data they share.
+            let relatives = report.relatives(of: machine).map(\.name)
+            guard !relatives.isEmpty else { return nil }
+            return "Shares disk data with \(relatives.formatted(.list(type: .and)))"
         }
 
         let kind = source.kind == .clone ? "Clone" : "Duplicate"

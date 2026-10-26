@@ -71,6 +71,9 @@ public struct VMStorageReport: Hashable, Sendable {
         public var bundleURL: URL
         public var systemType: VBGuestType
         public var copiedFrom: VBVirtualMachine.Metadata.CopySource?
+        /// When the virtual machine's bundle was created, which tells which of the virtual machines that share data came first
+        /// when where they came from wasn't recorded.
+        public var creationDate: Date
         public var files: [File]
         /// The space the virtual machine's files take up, counting files that are identical copies of each other once.
         public var size: UInt64
@@ -96,13 +99,14 @@ public struct VMStorageReport: Hashable, Sendable {
             files(in: category).reduce(0) { $0 + $1.usage.allocatedSize }
         }
 
-        public init(id: VBVirtualMachine.ID, uuid: UUID, name: String, bundleURL: URL, systemType: VBGuestType, copiedFrom: VBVirtualMachine.Metadata.CopySource?, files: [File], size: UInt64, freedIfDeleted: UInt64, sharesStorageWith: Set<UUID> = [], sharesStorageWithTrashedItems: Set<URL> = []) {
+        public init(id: VBVirtualMachine.ID, uuid: UUID, name: String, bundleURL: URL, systemType: VBGuestType, copiedFrom: VBVirtualMachine.Metadata.CopySource?, creationDate: Date = .distantPast, files: [File], size: UInt64, freedIfDeleted: UInt64, sharesStorageWith: Set<UUID> = [], sharesStorageWithTrashedItems: Set<URL> = []) {
             self.id = id
             self.uuid = uuid
             self.name = name
             self.bundleURL = bundleURL
             self.systemType = systemType
             self.copiedFrom = copiedFrom
+            self.creationDate = creationDate
             self.files = files
             self.size = size
             self.freedIfDeleted = freedIfDeleted
@@ -115,7 +119,8 @@ public struct VMStorageReport: Hashable, Sendable {
     public struct Family: Identifiable, Hashable, Sendable {
         public struct Member: Hashable, Sendable {
             public var machine: Machine
-            /// How many copies away from the family's first virtual machine it is.
+            /// How many copies away from the family's first virtual machine it is. Virtual machines that share data with the
+            /// family's first virtual machine without a record of where they came from come right under it.
             public var depth: Int
 
             public init(machine: Machine, depth: Int) {
