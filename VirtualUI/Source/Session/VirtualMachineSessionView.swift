@@ -77,7 +77,7 @@ public struct VirtualMachineSessionView: View {
             sessionManager.focusedSessionChanged.send(isKey ? .init(ui) : nil)
         }
         .onReceive(ui.resizeWindow) { size in
-            guard var display = controller.virtualMachineModel.configuration.hardware.displayDevices.first else {
+            guard var display = controller.effectiveDisplay else {
                 assertionFailure("VM doesn't have a display")
                 return
             }
@@ -95,6 +95,10 @@ public struct VirtualMachineSessionView: View {
         }
         .onReceive(ui.makeWindowKey) {
             window?.makeKeyAndOrderFront(nil)
+        }
+        .onReceive(ui.fullScreenRequest.compactMap { $0 }) { screen in
+            ui.fullScreenRequest.send(nil)
+            enterFullScreen(on: screen)
         }
         /// This takes care of booting when initially opening a session with a deep link that wants auto-boot.
         /// Booting after the session is already open is handled by ``VirtualMachineSessionUI``.
@@ -231,7 +235,7 @@ public struct VirtualMachineSessionView: View {
                 captureSystemKeysEnabled: controller.virtualMachineModel.configuration.captureSystemKeys,
                 isDFUModeVM: controller.options.bootInDFUMode,
                 vmECID: controller.virtualMachineModel.ECID,
-                automaticallyReconfiguresDisplay: .constant(controller.virtualMachineModel.configuration.hardware.displayDevices.count > 0 ? controller.virtualMachineModel.configuration.hardware.displayDevices[0].automaticallyReconfiguresDisplay : false),
+                automaticallyReconfiguresDisplay: .constant(controller.effectiveDisplay?.automaticallyReconfiguresDisplay ?? false),
                 onInputToggleHold: onInputToggleHold,
                 fileTransfers: fileTransfers
             )
@@ -340,6 +344,28 @@ public struct VirtualMachineSessionView: View {
             isRunning: controller.isRunning
         )
         .ignoresSafeArea()
+    }
+
+    /// Moves the window to the screen, then takes it full screen in a space of its own. The window may still be opening when
+    /// it's asked to, so this happens once the window has been shown.
+    private func enterFullScreen(on screen: NSScreen) {
+        guard let window else { return }
+
+        DispatchQueue.main.async { [weak window] in
+            guard let window, !window.styleMask.contains(.fullScreen) else { return }
+
+            if window.screen != screen {
+                let visibleFrame = screen.visibleFrame
+                var frame = window.frame
+                frame.size.width = min(frame.width, visibleFrame.width)
+                frame.size.height = min(frame.height, visibleFrame.height)
+                frame.origin = CGPoint(x: visibleFrame.midX - frame.width / 2, y: visibleFrame.midY - frame.height / 2)
+                window.setFrame(frame, display: false)
+            }
+
+            window.makeKeyAndOrderFront(nil)
+            window.toggleFullScreen(nil)
+        }
     }
 
     /// Closing the window saves the virtual machine (or shuts it down when it can't be saved) before the window goes away,

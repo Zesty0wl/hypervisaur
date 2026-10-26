@@ -105,6 +105,24 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
         }
     }
 
+    /// Starts the virtual machine full screen, in a space of its own on the screen, with its display set to the screen's
+    /// size in pixels for this start only, so that the guest's pixels are the screen's. Its settings stay as they are.
+    ///
+    /// A saved session resumes with the display it was saved with, and a virtual machine that's already running keeps its
+    /// display: they only go full screen.
+    public func launchInFullScreen(_ vm: VBVirtualMachine, library: VMLibraryController, on screen: NSScreen) {
+        let isRunning = session(for: vm).map { !$0.controller.canStart } ?? false
+
+        if isRunning || vm.savedSession != nil {
+            launch(vm, library: library, options: isRunning ? nil : VMSessionOptions(autoBoot: true))
+        } else {
+            let display = VBDisplayDevice.filling(screen, basedOn: vm.configuration.hardware.displayDevices.first)
+            launch(vm, library: library, options: VMSessionOptions(autoBoot: true, displayOverride: display))
+        }
+
+        session(for: vm)?.enterFullScreen(on: screen)
+    }
+
     private func presentMACAddressConflictAlert(conflicts: [MACAddressConflict]) async -> MACAddressConflictResolution {
         let alert = NSAlert()
         alert.messageText = "Duplicate MAC Address"

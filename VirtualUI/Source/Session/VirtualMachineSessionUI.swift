@@ -32,6 +32,9 @@ public final class VirtualMachineSessionUI: ObservableObject {
     let resizeWindow = PassthroughSubject<WindowSize, Never>()
     let makeWindowKey = PassthroughSubject<Void, Never>()
 
+    /// The screen that the window is to go full screen on, which is kept until the window is open to do it. See ``enterFullScreen(on:)``.
+    let fullScreenRequest = CurrentValueSubject<NSScreen?, Never>(nil)
+
     public let controller: VMController
     public let virtualMachine: VBVirtualMachine
 
@@ -91,7 +94,7 @@ public final class VirtualMachineSessionUI: ObservableObject {
             .map { [weak self] lockProportions, fixedGuestDisplaySize -> CGSize? in
                 if let fixedGuestDisplaySize { return fixedGuestDisplaySize }
 
-                guard lockProportions, let display = self?.virtualMachine.configuration.hardware.displayDevices.first else { return nil }
+                guard lockProportions, let display = self?.controller.effectiveDisplay else { return nil }
                 return CGSize(width: display.width, height: display.height)
             }
             .removeDuplicates()
@@ -145,7 +148,7 @@ public final class VirtualMachineSessionUI: ObservableObject {
             /// Virtualization keeps the display at its configured size, unless it's set to follow the window. QEMU reports
             /// the guest's resolution from its frames instead, since Windows can change it.
             if display == .virtualization,
-               let device = self.virtualMachine.configuration.hardware.displayDevices.first,
+               let device = self.controller.effectiveDisplay,
                !device.automaticallyReconfiguresDisplay
             {
                 self.fixedGuestDisplaySize = CGSize(width: device.width, height: device.height)
@@ -231,6 +234,12 @@ public final class VirtualMachineSessionUI: ObservableObject {
     @MainActor
     public func bringToFront() {
         makeWindowKey.send()
+    }
+
+    /// Takes the window full screen on the screen, in a space of its own, as soon as the window is open.
+    @MainActor
+    public func enterFullScreen(on screen: NSScreen) {
+        fullScreenRequest.send(screen)
     }
 
     deinit {

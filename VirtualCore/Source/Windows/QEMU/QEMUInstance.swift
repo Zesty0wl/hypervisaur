@@ -9,9 +9,10 @@ final class QEMUInstance: VMEngineInstance {
     var options = VMSessionOptions.default
 
     let virtualMachineModel: VBVirtualMachine
-    /// The virtual machine as it was when a session was saved, while that session runs.
-    private var restoredModel: VBVirtualMachine?
-    var effectiveModel: VBVirtualMachine { restoredModel ?? virtualMachineModel }
+    /// The virtual machine as it runs, when that's different from its settings: as it was when the session that's running
+    /// was saved, or with the display it was started with in place of its own.
+    private var runningModel: VBVirtualMachine?
+    var effectiveModel: VBVirtualMachine { runningModel ?? virtualMachineModel }
     let isRecoveryBoot = false
 
     /// Guests that run with QEMU don't have the guest app.
@@ -47,7 +48,12 @@ final class QEMUInstance: VMEngineInstance {
     }
 
     func startVM() async throws {
-        let model = virtualMachineModel
+        var model = virtualMachineModel
+        if let display = options.displayOverride {
+            model.configuration.hardware.displayDevices = [display]
+            runningModel = model
+        }
+
         let devices = try await prepareDevices(forInstallation: options.bootOnInstallDevice)
         let isUnattendedInstallation = devices.installDiskURL != nil && (try? model.windowsUnattendedSetup()) != nil
 
@@ -72,6 +78,7 @@ final class QEMUInstance: VMEngineInstance {
             try await machine.start(restoring: restoration)
         } catch {
             self.machine = nil
+            runningModel = nil
             guestAgentInfoObservation = nil
             library.unregisterBootedVM(self)
             throw error
@@ -209,7 +216,7 @@ final class QEMUInstance: VMEngineInstance {
         setupCompletionTask?.cancel()
         setupCompletionTask = nil
         machine = nil
-        restoredModel = nil
+        runningModel = nil
         guestAgentInfoObservation = nil
         guestAgentInfo.send(nil)
         library.unregisterBootedVM(self)
@@ -313,14 +320,14 @@ extension QEMUInstance: VMSessionSavingInstance {
             throw SavedSessionError.configurationChanged("Hypervisaur starts Windows virtual machines differently from when this session was saved.")
         }
 
-        restoredModel = model
+        runningModel = model
 
         onConstructed(.qemu(machine))
 
         do {
             try await start(machine, restoring: QEMUVirtualMachine.Restoration(stateFileURL: preparation.stateFileURL, machineType: description.machineType))
         } catch {
-            restoredModel = nil
+            runningModel = nil
             logger.error("Restoring the saved session failed: \(error, privacy: .public)")
             throw error
         }

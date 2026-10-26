@@ -202,6 +202,17 @@ struct LibraryItemView: View {
         }
 
         Button {
+            guard let screen = NSApp.keyWindow?.screen ?? NSScreen.main else { return }
+            sessionManager.launchInFullScreen(vm, library: library, on: screen)
+        } label: {
+            Label(fullScreenTitle, systemImage: "arrow.up.left.and.arrow.down.right")
+        }
+        .disabled(isDuplicating)
+        .help(fullScreenHelp)
+
+        Divider()
+
+        Button {
             NSWorkspace.shared.selectFile(vm.bundleURL.path, inFileViewerRootedAtPath: vm.bundleURL.deletingLastPathComponent().path)
         } label: {
             Label("Show in Finder", systemImage: "folder")
@@ -268,6 +279,21 @@ struct LibraryItemView: View {
             Text("Move to Trash…")
         }
         .disabled(isVMBooted || isDuplicating)
+    }
+
+    private var isRunning: Bool {
+        sessionManager.session(for: vm).map { !$0.controller.canStart } ?? false
+    }
+
+    private var fullScreenTitle: String {
+        if isRunning { return "Show in Full Screen" }
+        return vm.savedSession != nil ? "Resume in Full Screen" : "Start in Full Screen"
+    }
+
+    private var fullScreenHelp: String {
+        if isRunning { return "Shows the virtual machine full screen, in a space of its own." }
+        if vm.savedSession != nil { return "Resumes the virtual machine full screen, in a space of its own. A saved session keeps the display it was saved with." }
+        return "Starts the virtual machine full screen, in a space of its own, with its display set to the screen’s resolution for this start only, so that each of its pixels is one of the screen’s. Its settings stay as they are."
     }
 
     private var duplicateHelp: String {
