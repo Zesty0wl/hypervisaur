@@ -45,6 +45,14 @@ struct QEMULaunchConfiguration {
     /// The size of the virtio GPU's display when Windows starts.
     static let virtioGPUDisplaySizeRange = (width: 640...7680, height: 480...4320)
 
+    /// The size the virtio GPU offers Windows for a display, as far as it supports it.
+    static func virtioGPUDisplaySize(for display: VBDisplayDevice) -> (width: Int, height: Int) {
+        let widthRange = virtioGPUDisplaySizeRange.width
+        let heightRange = virtioGPUDisplaySizeRange.height
+        return (min(max(display.width, widthRange.lowerBound), widthRange.upperBound),
+                min(max(display.height, heightRange.lowerBound), heightRange.upperBound))
+    }
+
     /// The port that the SPICE agent in the guest looks for.
     static let spiceAgentPortName = "com.redhat.spice.0"
 
@@ -165,12 +173,8 @@ struct QEMULaunchConfiguration {
         case .framebuffer:
             return "ramfb"
         case .virtioGPU:
-            let display = model.configuration.hardware.displayDevices.first ?? .windowsDisplay
-            let widthRange = Self.virtioGPUDisplaySizeRange.width
-            let heightRange = Self.virtioGPUDisplaySizeRange.height
-            let width = min(max(display.width, widthRange.lowerBound), widthRange.upperBound)
-            let height = min(max(display.height, heightRange.lowerBound), heightRange.upperBound)
-            return "virtio-gpu-pci,xres=\(width),yres=\(height)"
+            let size = Self.virtioGPUDisplaySize(for: model.configuration.hardware.displayDevices.first ?? .windowsDisplay)
+            return "virtio-gpu-pci,xres=\(size.width),yres=\(size.height)"
         }
     }
 

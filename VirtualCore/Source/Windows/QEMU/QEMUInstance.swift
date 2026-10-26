@@ -28,6 +28,8 @@ final class QEMUInstance: VMEngineInstance {
     private var setupCompletionTask: Task<Void, Never>?
     /// Set while the virtual machine is released on purpose, which isn't news for whoever is told that it stopped.
     private var isReleasing = false
+    /// Switches Windows to the display it was started with in place of its own. See ``WindowsDisplayResolution``.
+    private var displayResolution: WindowsDisplayResolution?
 
     private let logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "QEMUInstance")
 
@@ -62,6 +64,18 @@ final class QEMUInstance: VMEngineInstance {
 
         if isUnattendedInstallation {
             restartWhenSetupFinishes(machine)
+        }
+
+        /// Windows only starts at a resolution it's been switched to before. The framebuffer has a fixed size, so it's only
+        /// switched with the virtio GPU.
+        if let display = options.displayOverride, devices.displayAdapter == .virtioGPU {
+            let size = QEMULaunchConfiguration.virtioGPUDisplaySize(for: display)
+            let resolution = WindowsDisplayResolution(width: size.width, height: size.height, guestName: model.name)
+            displayResolution = resolution
+            resolution.apply { [weak self, weak machine] in
+                guard let machine, self?.machine === machine else { return nil }
+                return machine.guestAgentConnection
+            }
         }
     }
 
@@ -215,6 +229,8 @@ final class QEMUInstance: VMEngineInstance {
     private func handleStop(_ error: Error?) {
         setupCompletionTask?.cancel()
         setupCompletionTask = nil
+        displayResolution?.cancel()
+        displayResolution = nil
         machine = nil
         runningModel = nil
         guestAgentInfoObservation = nil

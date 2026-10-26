@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import VirtualWormhole
 import OSLog
+import os
 
 /// Carries frames to and from the agent in a guest.
 public protocol GuestAgentTransport: AnyObject, Sendable {
@@ -353,6 +354,66 @@ public final class GuestAgentConnection: @unchecked Sendable {
         }
         onInfoChange?(nil)
         infoSubject.send(nil)
+    }
+}
+
+public extension GuestAgentConnection {
+    /// Runs a command in the guest and waits for it to finish, stopping it if it takes longer than the timeout.
+    func run(_ command: String, timeout: Duration) async throws -> GuestAgentCommandResult {
+        struct Progress {
+            var output = Data()
+            var errorOutput = Data()
+            var timedOut = false
+            var isFinished = false
+            var timeoutTask: Task<Void, Never>?
+        }
+
+        let progress = OSAllocatedUnfairLock(initialState: Progress())
+
+        return try await withCheckedThrowingContinuation { continuation in
+            /// Events arrive on the transport's thread, and the timeout on another, so whichever comes first finishes.
+            @Sendable func finish(_ result: (Progress) -> Result<GuestAgentCommandResult, Error>) {
+                let finished = progress.withLock { state -> Progress? in
+                    guard !state.isFinished else { return nil }
+                    state.isFinished = true
+                    return state
+                }
+                guard let finished else { return }
+
+                finished.timeoutTask?.cancel()
+                continuation.resume(with: result(finished))
+            }
+
+            do {
+                let channel = try open(GuestAgentOpenRequest(command: command)) { event in
+                    switch event {
+                    case .output(let data):
+                        progress.withLock { $0.output.append(data) }
+                    case .errorOutput(let data):
+                        progress.withLock { $0.errorOutput.append(data) }
+                    case .exited(let status):
+                        finish { .success(GuestAgentCommandResult(output: $0.output, errorOutput: $0.errorOutput, status: status, timedOut: $0.timedOut)) }
+                    case .failed(let message):
+                        finish { _ in .failure(Failure(message)) }
+                    }
+                }
+                channel.endInput()
+
+                let timeoutTask = Task {
+                    try? await Task.sleep(for: timeout)
+                    guard !Task.isCancelled else { return }
+                    progress.withLock { $0.timedOut = true }
+                    channel.terminate()
+                }
+                let isFinished = progress.withLock { state -> Bool in
+                    state.timeoutTask = timeoutTask
+                    return state.isFinished
+                }
+                if isFinished { timeoutTask.cancel() }
+            } catch {
+                finish { _ in .failure(error) }
+            }
+        }
     }
 }
 
