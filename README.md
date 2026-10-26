@@ -76,12 +76,13 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for ru
 - **macOS virtual machines** on macOS 12 or later, using Apple's Virtualization framework, with the macOS versions available to download kept up to date from this repository
 - **Linux virtual machines** from Ubuntu, Fedora, Debian and Kali, always downloading the newest image of each release, or from any ARM64 disc image
 - **Windows 11 virtual machines**, installed from Microsoft's Windows 11 ARM64 disc image, optionally without going through Windows Setup at all
-- Clipboard sharing for macOS, Linux and Windows guests, and shared folders and saved sessions for macOS guests
+- Clipboard sharing for macOS, Linux and Windows guests, shared folders for macOS guests, and saved sessions for macOS and Windows guests
 - Screenshots and screen recordings of any virtual machine, with its sound
 - Clones that run alongside the original and only take up the space of what's changed
 - A shell in any running virtual machine, commands run from the Mac, and its logs as they're logged
 - Drag and drop of files and folders between the Mac and macOS, Windows and Linux virtual machines, with progress and speed
-- A library that shows which virtual machines are running, how much processor time and memory each one is using, and the space each one takes up on disk
+- A library that shows which virtual machines are running, a live picture of what's on their screens, how much processor time and memory each one is using, and the space each one takes up on disk
+- Virtual machines that keep running in the background after you close their window, optionally keeping them and the Mac awake
 - Windows that open at the size of the virtual machine's display, and keep its shape as you resize them
 - Importing virtual machines from VirtualBuddy and UTM
 - An [MCP](https://modelcontextprotocol.io) server, so a coding agent can build a Windows virtual machine for you
@@ -120,7 +121,8 @@ Installing takes about 10 minutes. Windows Setup uses a basic 800×600 display; 
 ### Things to know
 
 - You need your own Windows license. Windows is installed without a product key, so it isn't activated until you activate it.
-- Windows virtual machines use NAT networking, sound output and a fixed display resolution that you can change in the virtual machine's settings. Shared folders, USB devices and saved sessions aren't available for Windows yet.
+- Windows virtual machines use NAT networking, sound output and a fixed display resolution that you can change in the virtual machine's settings. Shared folders and USB devices aren't available for Windows yet.
+- Save State works for Windows as it does for macOS, except while Windows Setup is running. Windows' sound device can't be saved, so it's disconnected while the state is saved and connected again when Windows resumes. A saved state may not resume after QEMU is updated with Homebrew; Hypervisaur then offers to discard it.
 - Text you copy on your Mac can be pasted in Windows, and the other way round. You can turn this off with Share Clipboard in the virtual machine's settings.
 - Windows virtual machines set up with Hypervisaur 0.1.0 need what's on the DRIVERS disk installing once, for the clipboard and the Hypervisaur agent: in Windows, open the DRIVERS drive, then right-click `VirtIODrivers\Setup.cmd` and choose Run as Administrator. After that, Windows keeps what's installed from the DRIVERS drive up to date by itself whenever it starts. Setup turns Fast Startup off, so that Windows always sees the newest drivers.
 - The window keeps the shape of Windows' display, and follows it when you change Windows' resolution.
@@ -197,6 +199,14 @@ Copies go through the Hypervisaur agent, so they don't need the network or share
 - **macOS**: the Hypervisaur Guest app needs to be running. It updates itself from the Guest disk when it starts.
 - **Windows**: Windows updates the agent from the DRIVERS drive when it starts, so restart a Windows virtual machine set up with an earlier version of Hypervisaur once.
 - **Linux**: you can drop files on a Linux virtual machine, and they go to the desktop of the user signed in at its display. Dragging files out of Linux isn't available, since Linux desktops don't let the agent see what's being dragged. Hypervisaur updates an agent installed from an earlier version by itself.
+
+## Running in the background
+
+Close a running virtual machine's window and choose **Keep Running** to leave it running without its window, or choose Guest › Run in Background (⇧⌘W). The library shows it as running in the background; click it to open its window again, or use its menu in the library to save it, shut it down or keep it awake. In Settings, you can make keeping it running what closing a window always does.
+
+With **Prevent sleep**, Hypervisaur keeps the Mac from going to sleep while a virtual machine runs in the background, and has the agent keep the virtual machine awake too: with `caffeinate` in macOS, `systemd-inhibit` in Linux and `SetThreadExecutionState` in Windows. The Mac's display can still turn off.
+
+While the library is on screen, each running virtual machine shows a lightly blurred picture of its screen, updated every 30 seconds. Pictures of macOS and Linux virtual machines come from their window and need permission to record the screen, so they stay as they were while the window is closed. Pictures of Windows virtual machines are always up to date.
 
 ## Clones
 
