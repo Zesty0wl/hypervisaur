@@ -37,6 +37,14 @@ Drag files and folders onto a virtual machine's window to copy them to its deskt
   <img src="./assets/Screenshots/DragAndDrop.png" width="720" alt="A panel at the bottom of a Windows virtual machine's window showing a 4.29 GB file being copied at 101.3 MB/s, with about 35 seconds left">
 </p>
 
+### See where your space goes
+
+The Storage window shows what each virtual machine takes up, how much deleting it would actually free, and which ones were cloned from which. Clones share their storage until they change, so deleting the virtual machine a clone came from can free surprisingly little; the Storage window shows exactly how much, and what it's shared with. See [Storage](#storage).
+
+<p align="center">
+  <img src="./assets/Screenshots/Storage.png" width="800" alt="The Storage window, showing a clone that takes up 32.96 GB but would only free 75.5 MB if deleted, because it shares 32.89 GB with the virtual machine it was cloned from">
+</p>
+
 ### Logs as they're logged
 
 The logs button follows the virtual machine's logs: the event logs in Windows, the systemd journal in Linux and the unified log in macOS. You can filter, pause and copy them.
@@ -79,6 +87,7 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for ru
 - Clipboard sharing for macOS, Linux and Windows guests, shared folders for macOS guests, and saved sessions for macOS and Windows guests
 - Screenshots and screen recordings of any virtual machine, with its sound
 - Clones that run alongside the original and only take up the space of what's changed
+- A Storage window that shows what each virtual machine takes up, what deleting it would free, and which ones were copied from which
 - A shell in any running virtual machine, commands run from the Mac, and its logs as they're logged
 - Drag and drop of files and folders between the Mac and macOS, Windows and Linux virtual machines, with progress and speed
 - A library that shows which virtual machines are running, a live picture of what's on their screens, how much processor time and memory each one is using, and the space each one takes up on disk
@@ -214,10 +223,25 @@ Choose Clone from a virtual machine's menu in the library to make a copy that ca
 
 Duplicate makes an exact copy instead, with the same identity, which is what a saved session needs to resume. A virtual machine with a saved session can't be cloned; resume it and shut it down first.
 
+To see how much space clones and the virtual machines they came from share, open Window › Storage. See [Storage](#storage).
+
 Things the operating system in a clone keeps from the original:
 
 - Windows keeps its computer name. This doesn't matter for networking, since each Windows virtual machine has a network of its own, but you can rename it in Settings › System › About.
 - Most Linux distributions keep their machine ID, which some DHCP servers use to give out addresses, so a clone can get the same IP address as the original. Give the clone a new one with `sudo rm /etc/machine-id && sudo systemd-machine-id-setup`, then restart it.
+
+## Storage
+
+Window › Storage, or the drive button in the library's toolbar, shows how virtual machines use the space on the library's volume:
+
+- A bar for the whole volume: virtual machines, downloads, virtual machines in the Trash, other files, space macOS can free when it needs to, and what's available.
+- Each virtual machine, under the one it was cloned or duplicated from, with what it takes up and what deleting it would free. A clone shares its storage with the virtual machine it came from until either of them changes, so deleting one of them only frees what's changed in it. What they share is freed once both are deleted.
+- For a selected virtual machine, which virtual machines it shares storage with, and what its disks, saved session, installation media and other files take up.
+- Downloaded installers and disc images, which can be moved to the Trash and downloaded again, and virtual machines in the Trash, which take up space until you empty it.
+
+Moving a virtual machine to the Trash from the library says how much space that frees, and what's shared with which virtual machines.
+
+Hypervisaur finds out what's shared from APFS. It knows which virtual machines clones and duplicates made with Hypervisaur 0.5 or later came from. For older copies, it finds the virtual machines that share data from their disk images.
 
 ## Building
 
