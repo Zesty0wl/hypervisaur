@@ -236,9 +236,6 @@ public final class VMInstance: NSObject, ObservableObject {
         var model = virtualMachineModel
         if let restoration {
             model.configuration = restoration.configuration
-        } else if let display = options.displayOverride {
-            /// Only the configuration the virtual machine runs with changes. Its settings are saved from `virtualMachineModel`.
-            model.configuration.hardware.displayDevices = [display]
         }
 
         let runtime = try await Self.makeRuntimeConfiguration(for: model, installImageURL: installImage, restoration: restoration)

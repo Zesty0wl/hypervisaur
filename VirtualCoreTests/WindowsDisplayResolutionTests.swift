@@ -2,7 +2,6 @@ import Foundation
 import Testing
 @testable import VirtualCore
 
-@MainActor
 struct WindowsDisplayResolutionTests {
     @Test func commandSwitchesToTheResolutionAndReportsHowItWent() {
         let command = WindowsDisplayResolution.command(width: 3840, height: 2160)

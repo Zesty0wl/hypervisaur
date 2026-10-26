@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// A resolution a guest's display can be switched to.
 public struct GuestDisplayResolution: Hashable, Comparable, Sendable {
@@ -34,20 +33,14 @@ public struct GuestDisplayModes: Hashable, Sendable {
     }
 }
 
-/// Switches Windows to the resolution of a display it was started with in place of its own, such as for a full-screen start.
+/// Switches Windows to another resolution, which Windows remembers and starts at next time.
 ///
-/// Windows treats each resolution that the display device offers as a different monitor. A monitor it hasn't seen before
-/// starts at its display driver's default, 1024 by 768, rather than at the resolution it's offered, and Windows
-/// remembers whatever a monitor was last switched to. So the first time Windows is started at a resolution, it has to be
-/// switched to it, and afterwards it starts at it by itself.
-///
+/// Windows' own display settings don't offer resolutions with the virtio GPU's driver, although the driver has them.
 /// Only the session of the user signed in at the display can change its resolution, and the Hypervisaur agent runs as a
 /// service outside it. So the agent registers a scheduled task that runs once in that session, as that user, and
-/// switches the resolution, then removes the task. Nobody may have signed in yet when Windows starts, so this keeps trying
-/// until somebody has.
-@MainActor
-final class WindowsDisplayResolution {
-    /// How a run of ``command`` ended.
+/// switches the resolution, then removes the task.
+enum WindowsDisplayResolution {
+    /// How a run of ``command(width:height:)`` ended.
     enum Outcome: Int32 {
         case switched = 0
         case alreadySet = 2
@@ -55,79 +48,7 @@ final class WindowsDisplayResolution {
         case didNotSwitch = 4
     }
 
-    /// How long to wait between attempts, such as while nobody has signed in.
-    static let retryInterval = Duration.seconds(10)
-    /// Attempts that fail for any reason other than nobody having signed in, after which trying again is pointless.
-    static let maximumFailures = 3
-
-    let width: Int
-    let height: Int
-
-    private let logger: Logger
-    private var task: Task<Void, Never>?
-
-    init(width: Int, height: Int, guestName: String) {
-        self.width = width
-        self.height = height
-        self.logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "WindowsDisplayResolution(\(guestName))")
-    }
-
-    /// Switches the resolution once the agent is running and somebody has signed in.
-    /// - Parameter connection: The connection to the agent, while there's one.
-    /// - Parameter onSwitched: Called once Windows has been switched.
-    func apply(using connection: @escaping @MainActor () -> GuestAgentConnection?, onSwitched: @escaping @MainActor () -> Void) {
-        task?.cancel()
-        task = Task { [weak self] in
-            guard await self?.run(using: connection) == true else { return }
-            onSwitched()
-        }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    /// - Returns: Whether Windows was switched.
-    private func run(using connection: @MainActor () -> GuestAgentConnection?) async -> Bool {
-        var failures = 0
-
-        while !Task.isCancelled {
-            if let connection = connection(), connection.info != nil {
-                do {
-                    let result = try await connection.run(Self.command(width: width, height: height), timeout: .seconds(90))
-
-                    switch Outcome(rawValue: result.status) {
-                    case .switched:
-                        logger.notice("Switched Windows to \(self.width)x\(self.height)")
-                        return true
-                    case .alreadySet:
-                        logger.info("Windows is already at \(self.width)x\(self.height)")
-                        return false
-                    case .nobodySignedIn:
-                        logger.debug("Waiting for somebody to sign in to switch Windows to \(self.width)x\(self.height)")
-                    case .didNotSwitch, nil:
-                        failures += 1
-                        logger.error("Couldn't switch Windows to \(self.width)x\(self.height), status \(result.status): \(String(decoding: result.errorOutput, as: UTF8.self), privacy: .public)")
-                    }
-                } catch {
-                    /// The agent restarting or going away isn't a reason to give up: it comes back.
-                    logger.notice("Couldn't ask Windows to switch its resolution yet: \(error, privacy: .public)")
-                }
-
-                guard failures < Self.maximumFailures else {
-                    logger.error("Giving up on switching Windows to \(self.width)x\(self.height)")
-                    return false
-                }
-            }
-
-            try? await Task.sleep(for: Self.retryInterval)
-        }
-
-        return false
-    }
-
-    /// Switches Windows to a resolution now, such as when it's chosen from the Guest menu.
+    /// Switches Windows to a resolution, such as one chosen from the Guest menu.
     static func switchResolution(to resolution: GuestDisplayResolution, over connection: GuestAgentConnection) async throws {
         let result = try await connection.run(command(width: resolution.width, height: resolution.height), timeout: .seconds(90))
 

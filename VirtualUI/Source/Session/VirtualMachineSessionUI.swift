@@ -488,41 +488,17 @@ private struct VirtualMachineGuestActions: View {
     }
 }
 
-/// Switches a Windows guest to the resolutions its display driver offers, since Windows' own settings don't let it.
 private struct VirtualMachineResolutionCommands: View {
     @ObservedObject var observer: WeakVMControllerObserver
 
-    @State private var switchingTo: GuestDisplayResolution?
-
-    private var controller: VMController? { observer.controller }
-
     var body: some View {
-        if let modes = controller?.guestDisplayModes, !modes.available.isEmpty {
+        if let controller = observer.controller, let modes = controller.guestDisplayModes, !modes.available.isEmpty {
             Menu {
-                ForEach(modes.available.reversed(), id: \.self) { resolution in
-                    Button {
-                        switchResolution(to: resolution)
-                    } label: {
-                        Label("\(resolution.width) × \(resolution.height)", systemImage: resolution == modes.current ? "checkmark" : "display")
-                    }
-                    .disabled(switchingTo != nil || resolution == modes.current)
+                GuestResolutionPicker(modes: modes, isSwitching: controller.isSwitchingGuestResolution) { [weak controller] resolution in
+                    controller?.switchGuestResolutionPresentingErrors(to: resolution)
                 }
             } label: {
                 Label("Resolution", systemImage: "display")
-            }
-        }
-    }
-
-    private func switchResolution(to resolution: GuestDisplayResolution) {
-        switchingTo = resolution
-
-        Task { @MainActor in
-            defer { switchingTo = nil }
-
-            do {
-                try await observer.controller?.switchGuestResolution(to: resolution)
-            } catch {
-                NSApp.presentError(error)
             }
         }
     }

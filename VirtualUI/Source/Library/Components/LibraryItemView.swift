@@ -292,8 +292,8 @@ struct LibraryItemView: View {
 
     private var fullScreenHelp: String {
         if isRunning { return "Shows the virtual machine full screen, in a space of its own." }
-        if vm.savedSession != nil { return "Resumes the virtual machine full screen, in a space of its own. A saved session keeps the display it was saved with." }
-        return "Starts the virtual machine full screen, in a space of its own, with its display set to the screen’s resolution for this start only, so that each of its pixels is one of the screen’s. Its settings stay as they are."
+        if vm.savedSession != nil { return "Resumes the virtual machine full screen, in a space of its own." }
+        return "Starts the virtual machine full screen, in a space of its own."
     }
 
     private var duplicateHelp: String {

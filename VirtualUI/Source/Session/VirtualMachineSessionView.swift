@@ -136,6 +136,8 @@ public struct VirtualMachineSessionView: View {
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
+                    VirtualMachineResolutionControl(controller: controller)
+
                     VirtualMachineCaptureControls()
                 }
 

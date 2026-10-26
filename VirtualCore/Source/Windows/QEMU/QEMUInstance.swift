@@ -9,10 +9,9 @@ final class QEMUInstance: VMEngineInstance {
     var options = VMSessionOptions.default
 
     let virtualMachineModel: VBVirtualMachine
-    /// The virtual machine as it runs, when that's different from its settings: as it was when the session that's running
-    /// was saved, or with the display it was started with in place of its own.
-    private var runningModel: VBVirtualMachine?
-    var effectiveModel: VBVirtualMachine { runningModel ?? virtualMachineModel }
+    /// The virtual machine as it was when a session was saved, while that session runs.
+    private var restoredModel: VBVirtualMachine?
+    var effectiveModel: VBVirtualMachine { restoredModel ?? virtualMachineModel }
     let isRecoveryBoot = false
 
     /// Guests that run with QEMU don't have the guest app.
@@ -28,12 +27,6 @@ final class QEMUInstance: VMEngineInstance {
     private var setupCompletionTask: Task<Void, Never>?
     /// Set while the virtual machine is released on purpose, which isn't news for whoever is told that it stopped.
     private var isReleasing = false
-    /// Switches Windows to the display it was started with in place of its own. See ``WindowsDisplayResolution``.
-    private var displayResolution: WindowsDisplayResolution?
-
-    /// Called when Windows has been switched to a different resolution by itself, such as after a full-screen start.
-    var onGuestResolutionChange: (() -> Void)?
-
     /// Whether Windows can be switched to another resolution. See ``QEMUVirtualMachine/canSwitchResolution``.
     var canSwitchResolution: Bool { machine?.canSwitchResolution == true }
 
@@ -56,12 +49,7 @@ final class QEMUInstance: VMEngineInstance {
     }
 
     func startVM() async throws {
-        var model = virtualMachineModel
-        if let display = options.displayOverride {
-            model.configuration.hardware.displayDevices = [display]
-            runningModel = model
-        }
-
+        let model = virtualMachineModel
         let devices = try await prepareDevices(forInstallation: options.bootOnInstallDevice)
         let isUnattendedInstallation = devices.installDiskURL != nil && (try? model.windowsUnattendedSetup()) != nil
 
@@ -70,20 +58,6 @@ final class QEMUInstance: VMEngineInstance {
 
         if isUnattendedInstallation {
             restartWhenSetupFinishes(machine)
-        }
-
-        /// Windows only starts at a resolution it's been switched to before. The framebuffer has a fixed size, so it's only
-        /// switched with the virtio GPU.
-        if let display = options.displayOverride, devices.displayAdapter == .virtioGPU {
-            let size = QEMULaunchConfiguration.virtioGPUDisplaySize(for: display)
-            let resolution = WindowsDisplayResolution(width: size.width, height: size.height, guestName: model.name)
-            displayResolution = resolution
-            resolution.apply { [weak self, weak machine] in
-                guard let machine, self?.machine === machine else { return nil }
-                return machine.guestAgentConnection
-            } onSwitched: { [weak self] in
-                self?.onGuestResolutionChange?()
-            }
         }
     }
 
@@ -100,7 +74,6 @@ final class QEMUInstance: VMEngineInstance {
             try await machine.start(restoring: restoration)
         } catch {
             self.machine = nil
-            runningModel = nil
             guestAgentInfoObservation = nil
             library.unregisterBootedVM(self)
             throw error
@@ -237,10 +210,8 @@ final class QEMUInstance: VMEngineInstance {
     private func handleStop(_ error: Error?) {
         setupCompletionTask?.cancel()
         setupCompletionTask = nil
-        displayResolution?.cancel()
-        displayResolution = nil
         machine = nil
-        runningModel = nil
+        restoredModel = nil
         guestAgentInfoObservation = nil
         guestAgentInfo.send(nil)
         library.unregisterBootedVM(self)
@@ -344,14 +315,14 @@ extension QEMUInstance: VMSessionSavingInstance {
             throw SavedSessionError.configurationChanged("Hypervisaur starts Windows virtual machines differently from when this session was saved.")
         }
 
-        runningModel = model
+        restoredModel = model
 
         onConstructed(.qemu(machine))
 
         do {
             try await start(machine, restoring: QEMUVirtualMachine.Restoration(stateFileURL: preparation.stateFileURL, machineType: description.machineType))
         } catch {
-            runningModel = nil
+            restoredModel = nil
             logger.error("Restoring the saved session failed: \(error, privacy: .public)")
             throw error
         }

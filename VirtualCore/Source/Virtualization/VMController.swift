@@ -35,19 +35,13 @@ public struct VMSessionOptions: Hashable, Codable {
     @DecodableDefault.False
     public var autoBoot = false
 
-    /// The display the virtual machine starts up with this time, in place of the one in its settings, which stay as they are.
-    /// It only applies to the next start: it's forgotten once the virtual machine has started, and a saved session always
-    /// resumes with the display it was saved with.
-    public var displayOverride: VBDisplayDevice?
-
     public static let `default` = VMSessionOptions()
 
-    public init(bootInRecoveryMode: Bool = false, bootInDFUMode: Bool = false, bootOnInstallDevice: Bool = false, autoBoot: Bool = false, displayOverride: VBDisplayDevice? = nil) {
+    public init(bootInRecoveryMode: Bool = false, bootInDFUMode: Bool = false, bootOnInstallDevice: Bool = false, autoBoot: Bool = false) {
         self.bootInRecoveryMode = bootInRecoveryMode
         self.bootInDFUMode = bootInDFUMode
         self.bootOnInstallDevice = bootOnInstallDevice
         self.autoBoot = autoBoot
-        self.displayOverride = displayOverride
 
         resolveMutuallyExclusiveOptions()
     }
@@ -223,8 +217,8 @@ public final class VMController: ObservableObject {
     /// The connection to the Hypervisaur agent in the guest, while the virtual machine runs.
     public var guestAgent: GuestAgentConnection? { instance?.guestAgentConnection }
 
-    /// The display the virtual machine is running with, which isn't the one in its settings when it was started with a
-    /// different one, or resumed a session that was saved with a different one.
+    /// The display the virtual machine is running with, which isn't the one in its settings when it resumed a session that
+    /// was saved with a different one.
     public var effectiveDisplay: VBDisplayDevice? {
         (instance?.effectiveModel ?? virtualMachineModel).configuration.hardware.displayDevices.first
     }
@@ -278,12 +272,6 @@ public final class VMController: ObservableObject {
                     Task { await self.loadGuestDisplayModes() }
                 }
             }
-
-        if let qemuInstance = newInstance as? QEMUInstance {
-            qemuInstance.onGuestResolutionChange = { [weak self] in
-                Task { await self?.loadGuestDisplayModes() }
-            }
-        }
     }
 
     private func runtime(of instance: any VMEngineInstance) throws -> VMRuntime {
@@ -326,6 +314,10 @@ public final class VMController: ObservableObject {
     @Published
     public private(set) var guestDisplayModes: GuestDisplayModes?
 
+    /// `true` while a Windows guest is being switched to another resolution.
+    @Published
+    public private(set) var isSwitchingGuestResolution = false
+
     /// Asks Windows which resolutions it offers, once its agent is running.
     private func loadGuestDisplayModes() async {
         guard let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent else {
@@ -342,11 +334,14 @@ public final class VMController: ObservableObject {
         }
     }
 
-    /// Switches a Windows guest to another resolution, which Windows then remembers.
+    /// Switches a Windows guest to another resolution. Windows remembers it, and starts at it next time.
     public func switchGuestResolution(to resolution: GuestDisplayResolution) async throws {
-        guard let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent else {
+        guard !isSwitchingGuestResolution, let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent else {
             throw Failure("The resolution of “\(virtualMachineModel.name)” can’t be changed right now.")
         }
+
+        isSwitchingGuestResolution = true
+        defer { isSwitchingGuestResolution = false }
 
         try await WindowsDisplayResolution.switchResolution(to: resolution, over: agent)
 
@@ -514,9 +509,6 @@ public final class VMController: ObservableObject {
             self.instance = newInstance
 
             try await newInstance.startVM()
-
-            /// The instance has the display it started with, and the next start uses the one in the settings again.
-            options.displayOverride = nil
 
             state = .running(try runtime(of: newInstance))
 
