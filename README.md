@@ -93,6 +93,7 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for ru
 - A library that shows which virtual machines are running, a live picture of what's on their screens, how much processor time and memory each one is using, and the space each one takes up on disk
 - Virtual machines that keep running in the background after you close their window, optionally keeping them and the Mac awake
 - Windows that open at the size of the virtual machine's display, and keep its shape as you resize them
+- A resolution menu in the window's toolbar for macOS, Linux and Windows virtual machines, and starting any virtual machine full screen in a space of its own
 - Importing virtual machines from VirtualBuddy and UTM
 - An [MCP](https://modelcontextprotocol.io) server, so a coding agent can build a Windows virtual machine for you
 
@@ -130,7 +131,8 @@ Installing takes about 10 minutes. Windows Setup uses a basic 800×600 display; 
 ### Things to know
 
 - You need your own Windows license. Windows is installed without a product key, so it isn't activated until you activate it.
-- Windows virtual machines use NAT networking, sound output and a fixed display resolution that you can change in the virtual machine's settings. Shared folders and USB devices aren't available for Windows yet.
+- Windows virtual machines use NAT networking and sound output. Shared folders and USB devices aren't available for Windows yet.
+- Windows' own display settings don't offer any resolutions with its display driver, so change the resolution from the resolution menu in the window's toolbar, or from Guest › Resolution. See [Resolution and full screen](#resolution-and-full-screen).
 - Save State works for Windows as it does for macOS, except while Windows Setup is running. Windows' sound device can't be saved, so it's disconnected while the state is saved and connected again when Windows resumes. A saved state may not resume after QEMU is updated with Homebrew; Hypervisaur then offers to discard it.
 - Text you copy on your Mac can be pasted in Windows, and the other way round. You can turn this off with Share Clipboard in the virtual machine's settings.
 - Windows virtual machines set up with Hypervisaur 0.1.0 need what's on the DRIVERS disk installing once, for the clipboard and the Hypervisaur agent: in Windows, open the DRIVERS drive, then right-click `VirtIODrivers\Setup.cmd` and choose Run as Administrator. After that, Windows keeps what's installed from the DRIVERS drive up to date by itself whenever it starts. Setup turns Fast Startup off, so that Windows always sees the newest drivers.
@@ -208,6 +210,15 @@ Copies go through the Hypervisaur agent, so they don't need the network or share
 - **macOS**: the Hypervisaur Guest app needs to be running. It updates itself from the Guest disk when it starts.
 - **Windows**: Windows updates the agent from the DRIVERS drive when it starts, so restart a Windows virtual machine set up with an earlier version of Hypervisaur once.
 - **Linux**: you can drop files on a Linux virtual machine, and they go to the desktop of the user signed in at its display. Dragging files out of Linux isn't available, since Linux desktops don't let the agent see what's being dragged. Hypervisaur updates an agent installed from an earlier version by itself.
+
+## Resolution and full screen
+
+Choose a resolution from the display menu in a running virtual machine's toolbar, or from Guest › Resolution.
+
+- **macOS and Linux**: the display switches straight away, and the virtual machine starts at that resolution from then on. The menu isn't shown when the display is set to follow the size of the window, since resizing the window changes the resolution then.
+- **Windows**: the menu lists the resolutions Windows' display driver offers, and Windows switches once somebody has signed in. Windows remembers the resolution, and starts at it next time.
+
+To start a virtual machine full screen, in a space of its own, right-click it in the library and choose Start in Full Screen. It starts at the resolution it has. A saved virtual machine offers Resume in Full Screen, and a running one Show in Full Screen.
 
 ## Running in the background
 
