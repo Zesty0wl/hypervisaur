@@ -52,6 +52,12 @@ struct VMBundleDuplicator: Sendable {
             }
 
             var copy = try VBVirtualMachine(bundleURL: workURL, isNewInstall: false, createIfNeeded: false)
+            copy.metadata.copiedFrom = VBVirtualMachine.Metadata.CopySource(
+                uuid: copy.uuid,
+                name: sourceURL.deletingPathExtension().lastPathComponent,
+                date: .now,
+                kind: guestIdentity == .new ? .clone : .duplicate
+            )
             copy.uuid = UUID()
             if guestIdentity == .new {
                 try copy.generateNewGuestIdentity()

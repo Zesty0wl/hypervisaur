@@ -260,9 +260,12 @@ struct LibraryItemView: View {
         Divider()
 
         Button {
-            library.performMoveToTrash(for: vm)
+            Task {
+                guard await MoveToTrashConfirmation.confirm(vm, library: library, from: NSApp.keyWindow) else { return }
+                library.performMoveToTrash(for: vm)
+            }
         } label: {
-            Text("Move to Trash")
+            Text("Move to Trash…")
         }
         .disabled(isVMBooted || isDuplicating)
     }

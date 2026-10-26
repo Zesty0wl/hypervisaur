@@ -83,6 +83,11 @@ struct VirtualBuddyApp: App {
                     openLibraryWindow()
                 }
                 .keyboardShortcut(KeyEquivalent("0"), modifiers: .command)
+
+                Button("Storage") {
+                    StorageWindow.open(library: library)
+                }
+                .keyboardShortcut(KeyEquivalent("0"), modifiers: [.command, .option])
             }
         }
         .handlesExternalEvents(matching: ["*"])

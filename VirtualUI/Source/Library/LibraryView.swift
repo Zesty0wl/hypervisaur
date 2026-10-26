@@ -71,6 +71,13 @@ public struct LibraryView: View {
     private var toolbarContents: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
+                StorageWindow.open(library: library)
+            } label: {
+                Image(systemName: "internaldrive")
+            }
+            .help("Storage")
+
+            Button {
                 openCocoaWindow {
                     VMInstallationWizard(library: library)
                 }

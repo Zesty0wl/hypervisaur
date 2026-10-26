@@ -27,6 +27,9 @@ public struct VBVirtualMachine: Identifiable, VBStorageDeviceContainer {
         /// If this VM was imported from some other app, contains the name of the ``VMImporter`` that was used.
         public var importedFromAppName: String? = nil
 
+        /// The virtual machine this one was cloned or duplicated from, which its files may share storage with.
+        public var copiedFrom: CopySource? = nil
+
         /// The original remote URL that was specified for downloading the restore image (if downloaded from a remote source).
         public private(set) var remoteInstallImageURL: URL? = nil
 
@@ -45,6 +48,30 @@ public struct VBVirtualMachine: Identifiable, VBStorageDeviceContainer {
                 installImageURL = url
             } else {
                 remoteInstallImageURL = url
+            }
+        }
+
+        /// Where a virtual machine that was made by copying another one came from.
+        public struct CopySource: Hashable, Codable, Sendable {
+            public enum Kind: String, Codable, Sendable {
+                /// A copy with its own identity, which can run alongside the original.
+                case clone
+                /// An exact copy, with the same identity as the original.
+                case duplicate
+            }
+
+            /// The original's ``Metadata/uuid``.
+            public var uuid: UUID
+            /// The original's name when it was copied, for when it's no longer in the library.
+            public var name: String
+            public var date: Date
+            public var kind: Kind
+
+            public init(uuid: UUID, name: String, date: Date, kind: Kind) {
+                self.uuid = uuid
+                self.name = name
+                self.date = date
+                self.kind = kind
             }
         }
 
