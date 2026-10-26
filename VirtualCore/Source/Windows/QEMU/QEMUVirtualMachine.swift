@@ -246,8 +246,6 @@ public final class QEMUVirtualMachine: ObservableObject {
         )
         configuration.machineType = machineType
         configuration.restoresSavedState = restoration != nil
-        /// The sound device can't be part of a saved state, so it's plugged in once the restored guest resumes.
-        configuration.attachesSoundDevice = restoration == nil
         let arguments = try configuration.arguments()
 
         try launchTPM(toolchain: toolchain, socketURL: paths.tpmSocket)
@@ -283,8 +281,12 @@ public final class QEMUVirtualMachine: ObservableObject {
         try await startGuestAgent(socketURL: paths.agentSocket)
 
         if let restoration {
+            /// The sound device was unplugged before the state was saved, so it has to be unplugged before it's loaded.
+            /// It's plugged in again when the guest resumes. See ``QEMULaunchConfiguration/restoresSavedState``.
+            if QEMULaunchConfiguration.hasSoundDevice(model) {
+                try await unplugSoundDevice(monitor: monitor)
+            }
             try await loadState(from: restoration.stateFileURL, monitor: monitor)
-            isSoundDeviceUnplugged = QEMULaunchConfiguration.hasSoundDevice(model)
         } else {
             isSoundDeviceUnplugged = false
             try await monitor.execute("cont")

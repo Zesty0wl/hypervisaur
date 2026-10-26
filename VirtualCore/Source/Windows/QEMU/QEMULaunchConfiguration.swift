@@ -33,10 +33,11 @@ struct QEMULaunchConfiguration {
     /// The machine type, which is pinned to the version a saved session was saved with when restoring it.
     var machineType = Self.defaultMachineType
     /// Whether QEMU waits for a saved session's state to be loaded through its monitor instead of booting.
+    ///
+    /// QEMU starts with the same devices as when it boots, even though the sound device was unplugged before the state was
+    /// saved. QEMU adds a USB hub when a device takes the last free port, so the devices only end up on the same ports as
+    /// when the state was saved if the sound device is plugged in at first, and unplugged before the state is loaded.
     var restoresSavedState = false
-    /// Whether the sound device is attached when QEMU starts. It can't be saved with a session, so it's unplugged
-    /// before saving and plugged in again once a session has been restored. See ``soundDeviceProperties``.
-    var attachesSoundDevice = true
 
     /// QEMU's current version of the machine type.
     static let defaultMachineType = "virt"
@@ -144,7 +145,6 @@ struct QEMULaunchConfiguration {
         configuration.runtimePaths = .placeholder
         configuration.machineType = Self.defaultMachineType
         configuration.restoresSavedState = false
-        configuration.attachesSoundDevice = true
 
         let bundlePath = model.bundleURL.path
         var arguments = try configuration.arguments().map { argument in
@@ -234,7 +234,8 @@ struct QEMULaunchConfiguration {
         model.configuration.hardware.soundDevices.contains(where: \.enableOutput)
     }
 
-    /// The sound device's properties for plugging it in with QEMU's `device_add` command.
+    /// The sound device's properties for plugging it in with QEMU's `device_add` command. It can't be saved with a session,
+    /// so it's unplugged before saving, and plugged in again when the guest resumes.
     static var soundDeviceProperties: [String: Any] {
         ["driver": "usb-audio", "id": soundDeviceID, "bus": "xhci.0", "audiodev": "audio0"]
     }
@@ -244,13 +245,10 @@ struct QEMULaunchConfiguration {
     private func audioArguments() -> [String] {
         guard Self.hasSoundDevice(model) else { return [] }
 
-        var arguments = ["-audiodev", "coreaudio,id=audio0"]
-
-        if attachesSoundDevice {
-            arguments += ["-device", "usb-audio,id=\(Self.soundDeviceID),bus=xhci.0,audiodev=audio0"]
-        }
-
-        return arguments
+        return [
+            "-audiodev", "coreaudio,id=audio0",
+            "-device", "usb-audio,id=\(Self.soundDeviceID),bus=xhci.0,audiodev=audio0",
+        ]
     }
 
     /// NVMe serial numbers are limited to 20 characters.

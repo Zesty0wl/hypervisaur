@@ -172,22 +172,26 @@ struct QEMULaunchConfigurationTests {
         #expect(arguments.contains(QEMULaunchConfiguration.defaultMachineType))
     }
 
-    @Test func restoringWaitsForTheStateWithThePinnedMachineTypeAndWithoutTheSoundDevice() throws {
+    @Test func restoringWaitsForTheStateWithThePinnedMachineTypeAndTheDevicesItBootsWith() throws {
         let vm = try makeWindowsMachine()
         try createBootDisk(for: vm)
         try #require(QEMULaunchConfiguration.hasSoundDevice(vm))
 
-        var configuration = makeConfiguration(for: vm)
+        var configuration = makeConfiguration(for: vm, driversDiskURL: vm.windowsDriversDiskURL)
+        let booting = try configuration.arguments()
         configuration.machineType = "virt-11.1"
         configuration.restoresSavedState = true
-        configuration.attachesSoundDevice = false
         let arguments = try configuration.arguments()
 
         let machineIndex = try #require(arguments.firstIndex(of: "-machine"))
         #expect(arguments[machineIndex + 1] == "virt-11.1")
         #expect(Array(arguments.suffix(2)) == ["-incoming", "defer"])
-        #expect(arguments.contains("coreaudio,id=audio0"), "the sound device is plugged into the same audio backend once the guest resumes")
-        #expect(!arguments.contains { $0.hasPrefix("usb-audio") })
+
+        /// QEMU puts a USB hub on the last free port, so the USB devices have to be the same as when booting, sound
+        /// device included, to end up on the same ports. The sound device is unplugged before the state is loaded.
+        let usbDevices = { (arguments: [String]) in arguments.filter { $0.contains("bus=xhci.0") } }
+        #expect(usbDevices(arguments) == usbDevices(booting))
+        #expect(arguments.contains("usb-audio,id=\(QEMULaunchConfiguration.soundDeviceID),bus=xhci.0,audiodev=audio0"))
     }
 
     @Test func comparableArgumentsIgnoreWhatMayChangeBetweenRuns() throws {
@@ -205,7 +209,6 @@ struct QEMULaunchConfigurationTests {
         restoring.runtimePaths.monitorSocket = URL(filePath: "/tmp/vbq-other/qmp.sock")
         restoring.machineType = "virt-11.1"
         restoring.restoresSavedState = true
-        restoring.attachesSoundDevice = false
 
         let saved = try makeConfiguration(for: vm).comparableArguments()
 
