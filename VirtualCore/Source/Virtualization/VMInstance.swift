@@ -49,6 +49,10 @@ public final class VMInstance: NSObject, ObservableObject {
         set { usbDeviceControllerStorage = newValue }
     }
     
+    /// The virtual machine's display, which can be switched to another resolution while it runs.
+    @available(macOS 14.0, *)
+    var display: VZGraphicsDisplay? { _virtualMachine?.graphicsDevices.first?.displays.first }
+
     var virtualMachine: VZVirtualMachine {
         get throws {
             guard let vm = _virtualMachine else {

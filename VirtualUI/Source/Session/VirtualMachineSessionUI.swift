@@ -155,6 +155,8 @@ public final class VirtualMachineSessionUI: ObservableObject {
             }
         }
         .store(in: &cancellables)
+
+        followVirtualizationDisplayResolution()
     }
 
     /// Responds to the user holding down the shortcut that toggles an input device.
@@ -217,6 +219,19 @@ public final class VirtualMachineSessionUI: ObservableObject {
             default: self = .none
             }
         }
+    }
+
+    /// A display of Virtualization that doesn't follow the window changes size when it's switched to another resolution.
+    @MainActor
+    private func followVirtualizationDisplayResolution() {
+        controller.$guestDisplayModes
+            .compactMap { $0?.current }
+            .removeDuplicates()
+            .sink { [weak self] resolution in
+                guard let self, ShownDisplay(self.controller.state) == .virtualization, self.fixedGuestDisplaySize != nil else { return }
+                self.fixedGuestDisplaySizeChanged(CGSize(width: resolution.width, height: resolution.height))
+            }
+            .store(in: &cancellables)
     }
 
     /// Called with each new resolution of a guest display that doesn't follow the size of the window.

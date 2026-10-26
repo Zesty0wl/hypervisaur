@@ -1,8 +1,8 @@
 import SwiftUI
 import VirtualCore
 
-/// The resolutions a Windows guest can be switched to, for the Guest menu and the window's toolbar, since Windows' own
-/// settings don't offer them with the virtio GPU's driver. The one Windows is using is checked.
+/// The resolutions the guest's display can be switched to, for the Guest menu and the window's toolbar. The one it's using
+/// is checked. Windows' own settings don't offer them with the virtio GPU's driver.
 struct GuestResolutionPicker: View {
     var modes: GuestDisplayModes
     var isSwitching: Bool
@@ -30,7 +30,7 @@ struct GuestResolutionPicker: View {
     }
 }
 
-/// A toolbar menu that switches a Windows guest to another resolution, while it can be switched.
+/// A toolbar menu that switches the guest's display to another resolution, while it can be switched.
 struct VirtualMachineResolutionControl: View {
     @ObservedObject var controller: VMController
 
@@ -44,7 +44,7 @@ struct VirtualMachineResolutionControl: View {
                 Label("Resolution", systemImage: "display")
                     .labelStyle(.iconOnly)
             }
-            .help(modes.current.map { "Change the resolution of Windows, which is \($0.title)" } ?? "Change the resolution of Windows")
+            .help(modes.current.map { "Change the virtual machine’s resolution, which is \($0.title)" } ?? "Change the virtual machine’s resolution")
         }
     }
 }

@@ -204,6 +204,15 @@ public final class VMController: ObservableObject {
             }
             .store(in: &cancellables)
 
+        /// Published before the state changes, so the modes are read once it has.
+        $state
+            .map { $0.isRunning || $0.isPaused }
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                Task { await self?.loadGuestDisplayModes() }
+            }
+            .store(in: &cancellables)
+
         library.addController(self)
 
         /// Make sure DFU mode flag is turned off if the app build doesn't allow DFU boot.
@@ -310,16 +319,22 @@ public final class VMController: ObservableObject {
 
     // MARK: Guest Display
 
-    /// The resolutions a Windows guest can be switched to, and the one it's using, while it can be switched.
+    /// The resolutions the guest's display can be switched to, and the one it's using, while it can be switched.
     @Published
     public private(set) var guestDisplayModes: GuestDisplayModes?
 
-    /// `true` while a Windows guest is being switched to another resolution.
+    /// `true` while the guest's display is being switched to another resolution.
     @Published
     public private(set) var isSwitchingGuestResolution = false
 
-    /// Asks Windows which resolutions it offers, once its agent is running.
+    /// Finds out which resolutions the guest's display can be switched to: those Windows offers once its agent is running,
+    /// or common ones for a display of Virtualization.
     private func loadGuestDisplayModes() async {
+        if let virtualizationInstance {
+            guestDisplayModes = virtualizationDisplayModes(of: virtualizationInstance)
+            return
+        }
+
         guard let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent else {
             guestDisplayModes = nil
             return
@@ -334,16 +349,44 @@ public final class VMController: ObservableObject {
         }
     }
 
-    /// Switches a Windows guest to another resolution. Windows remembers it, and starts at it next time.
+    /// A display of Virtualization can be switched to any resolution, unless it follows the size of the window.
+    private func virtualizationDisplayModes(of instance: VMInstance) -> GuestDisplayModes? {
+        guard #available(macOS 14.0, *),
+              state.isRunning || state.isPaused,
+              effectiveDisplay?.automaticallyReconfiguresDisplay == false,
+              let display = instance.display
+        else { return nil }
+
+        let current = GuestDisplayResolution(width: Int(display.sizeInPixels.width), height: Int(display.sizeInPixels.height))
+        return GuestDisplayModes(current: current, available: Set(GuestDisplayResolution.common + [current]).sorted())
+    }
+
+    /// Switches the guest's display to another resolution, which it starts at next time.
     public func switchGuestResolution(to resolution: GuestDisplayResolution) async throws {
-        guard !isSwitchingGuestResolution, let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent else {
-            throw Failure("The resolution of “\(virtualMachineModel.name)” can’t be changed right now.")
-        }
+        let unavailable = Failure("The resolution of “\(virtualMachineModel.name)” can’t be changed right now.")
+        guard !isSwitchingGuestResolution, guestDisplayModes != nil else { throw unavailable }
 
         isSwitchingGuestResolution = true
         defer { isSwitchingGuestResolution = false }
 
-        try await WindowsDisplayResolution.switchResolution(to: resolution, over: agent)
+        if let virtualizationInstance {
+            guard #available(macOS 14.0, *), let display = virtualizationInstance.display else { throw unavailable }
+
+            try display.reconfigure(sizeInPixels: CGSize(width: resolution.width, height: resolution.height))
+
+            /// The display starts at its configured size. A saved session keeps the configuration it was saved with.
+            if var device = virtualMachineModel.configuration.hardware.displayDevices.first {
+                device.width = resolution.width
+                device.height = resolution.height
+                virtualMachineModel.configuration.hardware.displayDevices[0] = device
+            }
+        } else if let qemuInstance = instance as? QEMUInstance, qemuInstance.canSwitchResolution, let agent = guestAgent {
+            /// Windows remembers the resolution itself. It isn't saved as the display's size, since Windows takes a display
+            /// of another size for a different monitor, which it starts at 1024 by 768.
+            try await WindowsDisplayResolution.switchResolution(to: resolution, over: agent)
+        } else {
+            throw unavailable
+        }
 
         guestDisplayModes?.current = resolution
     }
