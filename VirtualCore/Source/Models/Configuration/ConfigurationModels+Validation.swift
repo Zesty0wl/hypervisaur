@@ -242,7 +242,8 @@ public extension VBGuestType {
 
     var supportsRosettaMount: Bool { self == .linux }
 
-    var supportsStateRestoration: Bool { self == .mac }
+    /// Virtualization saves macOS guests, and QEMU saves Windows guests.
+    var supportsStateRestoration: Bool { self == .mac || self == .windows }
 
     var supportedRestoreImageTypes: Set<UTType> {
         switch self {

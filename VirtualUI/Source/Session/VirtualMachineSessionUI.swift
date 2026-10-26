@@ -27,7 +27,8 @@ public final class VirtualMachineSessionUI: ObservableObject {
     /// and about the shortcut that can be held down to do so.
     let inputStatusHUD: VMInputStatusHUDPresenter
 
-    let setWindowAspectRatio = PassthroughSubject<CGSize?, Never>()
+    /// Holds on to the current aspect ratio, so that a window that opens for a virtual machine that's already running gets it too.
+    let setWindowAspectRatio = CurrentValueSubject<CGSize?, Never>(nil)
     let resizeWindow = PassthroughSubject<WindowSize, Never>()
     let makeWindowKey = PassthroughSubject<Void, Never>()
 
@@ -52,6 +53,12 @@ public final class VirtualMachineSessionUI: ObservableObject {
     /// Copies files dropped on the window to the guest, and files dragged out of the guest to the Mac.
     @MainActor private(set) lazy var fileTransfers = GuestFileTransferCenter(controller: controller)
 
+    /// Keeps the virtual machine awake while it runs in the background, when the user asks for it.
+    @MainActor private(set) lazy var sleepPrevention = VMSleepPrevention(controller: controller)
+
+    /// What the virtual machine's display shows, for the library.
+    let livePreview: VMLivePreview
+
     /// Sent with each screenshot or recording once it's saved.
     let capturedFileSaved = PassthroughSubject<URL, Never>()
 
@@ -74,6 +81,7 @@ public final class VirtualMachineSessionUI: ObservableObject {
         self.controller = controller
         self.virtualMachine = controller.virtualMachineModel
         self.inputStatusHUD = VMInputStatusHUDPresenter()
+        self.livePreview = VMLivePreview()
 
         self.prompts = SessionAlertPrompts(ui: self)
         self.closer = SessionCloseCoordinator(controller: controller, prompts: prompts)
@@ -126,6 +134,7 @@ public final class VirtualMachineSessionUI: ObservableObject {
 
             guard display != .none else {
                 self.fixedGuestDisplaySize = nil
+                self.clearPreview()
 
                 if self.recording != nil {
                     Task { await self.stopRecording() }
@@ -385,6 +394,16 @@ private struct VirtualMachineGuestActions: View {
                 .keyboardShortcut("w", modifiers: [.command, .option])
                 .disabled(actionTask != nil || controller?.state.canSaveAndClose != true)
             }
+
+            Button {
+                runGuestAction {
+                    await session?.runInBackground()
+                }
+            } label: {
+                Label("Run in Background", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+            .disabled(actionTask != nil || session?.canRunInBackground != true)
 
             /// Available even while another action is in progress, since a stuck one is when it's needed.
             Button {

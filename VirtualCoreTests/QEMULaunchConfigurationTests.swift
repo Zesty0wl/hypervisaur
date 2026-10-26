@@ -158,6 +158,80 @@ struct QEMULaunchConfigurationTests {
         #expect(!vm.windowsIsInstalled)
     }
 
+    // MARK: - Saved Sessions
+
+    @Test func bootingNamesTheSoundDeviceSoThatItCanBeUnpluggedForSaving() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        try #require(QEMULaunchConfiguration.hasSoundDevice(vm))
+
+        let arguments = try makeConfiguration(for: vm).arguments()
+
+        #expect(arguments.contains("usb-audio,id=\(QEMULaunchConfiguration.soundDeviceID),bus=xhci.0,audiodev=audio0"))
+        #expect(!arguments.contains("-incoming"))
+        #expect(arguments.contains(QEMULaunchConfiguration.defaultMachineType))
+    }
+
+    @Test func restoringWaitsForTheStateWithThePinnedMachineTypeAndWithoutTheSoundDevice() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        try #require(QEMULaunchConfiguration.hasSoundDevice(vm))
+
+        var configuration = makeConfiguration(for: vm)
+        configuration.machineType = "virt-11.1"
+        configuration.restoresSavedState = true
+        configuration.attachesSoundDevice = false
+        let arguments = try configuration.arguments()
+
+        let machineIndex = try #require(arguments.firstIndex(of: "-machine"))
+        #expect(arguments[machineIndex + 1] == "virt-11.1")
+        #expect(Array(arguments.suffix(2)) == ["-incoming", "defer"])
+        #expect(arguments.contains("coreaudio,id=audio0"), "the sound device is plugged into the same audio backend once the guest resumes")
+        #expect(!arguments.contains { $0.hasPrefix("usb-audio") })
+    }
+
+    @Test func comparableArgumentsIgnoreWhatMayChangeBetweenRuns() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        /// The same virtual machine somewhere else, with a different name that needs escaping in QEMU's options, restored
+        /// with the configuration that was saved with its session.
+        let movedURL = vm.bundleURL.deletingLastPathComponent().appending(path: "Renamed, Moved.vbvm", directoryHint: .isDirectory)
+        try FileManager.default.copyItem(at: vm.bundleURL, to: movedURL)
+        var moved = try VBVirtualMachine(bundleURL: movedURL)
+        moved.configuration = try PropertyListDecoder().decode(VBMacConfiguration.self, from: PropertyListEncoder().encode(vm.configuration))
+
+        var restoring = makeConfiguration(for: moved)
+        restoring.runtimePaths.monitorSocket = URL(filePath: "/tmp/vbq-other/qmp.sock")
+        restoring.machineType = "virt-11.1"
+        restoring.restoresSavedState = true
+        restoring.attachesSoundDevice = false
+
+        let saved = try makeConfiguration(for: vm).comparableArguments()
+
+        #expect(try restoring.comparableArguments() == saved)
+        #expect(!saved.contains { $0.contains(vm.bundleURL.path) || $0.contains("/tmp/vbq-test") })
+    }
+
+    @Test func comparableArgumentsChangeWithTheHardware() throws {
+        var vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        let before = try makeConfiguration(for: vm).comparableArguments()
+        vm.configuration.hardware.cpuCount += 1
+
+        #expect(try makeConfiguration(for: vm).comparableArguments() != before)
+    }
+
+    @Test func windowsSessionsCanBeSaved() throws {
+        let vm = try makeWindowsMachine()
+
+        let eligibility = SavedSessionEligibility.evaluate(model: vm, options: .default, supportsCloning: true)
+
+        #expect(!eligibility.issues.contains(.unsupportedGuest))
+        #expect(eligibility.isApplicable)
+    }
+
     // MARK: - Helpers
 
     private func makeWindowsMachine(named name: String = "Windows") throws -> VBVirtualMachine {

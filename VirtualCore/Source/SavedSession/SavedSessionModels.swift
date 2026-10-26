@@ -59,7 +59,12 @@ public struct VBSavedSessionDescriptor: Identifiable, Hashable, Sendable {
 /// Describes the contents of a saved session package. The manifest is the last thing written to a package,
 /// and a package is only ever visible once it's complete.
 struct SavedSessionManifest: Codable, Hashable, Sendable {
-    static let currentFormatVersion = 1
+    /// The newest format this version of the app can read.
+    static let currentFormatVersion = 2
+    /// Sessions saved with Virtualization keep the original format, so that earlier versions of the app can still resume them.
+    static let virtualizationFormatVersion = 1
+    /// Sessions saved with QEMU, which earlier versions of the app can't resume.
+    static let qemuFormatVersion = 2
 
     enum Role: String, Codable, Sendable {
         case disk
@@ -67,6 +72,8 @@ struct SavedSessionManifest: Codable, Hashable, Sendable {
         case machineIdentifier
         case hardwareModel
         case guestAdditionsMedia
+        /// The UEFI variable store of a virtual machine that runs with QEMU.
+        case firmwareVariables
     }
 
     struct Resource: Codable, Hashable, Sendable {
@@ -91,7 +98,10 @@ struct SavedSessionManifest: Codable, Hashable, Sendable {
     var configurationFileName: String
     var screenshotFileName: String?
     var resources: [Resource]
-    var runtimeDescription: SavedSessionRuntimeDescription
+    /// How the virtual machine was constructed, for sessions saved with Virtualization.
+    var runtimeDescription: SavedSessionRuntimeDescription?
+    /// How QEMU was started, for sessions saved with QEMU.
+    var qemuDescription: QEMUSavedSessionDescription?
     var wasPausedBeforeSave: Bool
 
     func resource(with role: Role) -> Resource? {
@@ -155,6 +165,7 @@ struct SavedSessionLayout: Sendable {
 
     static let manifestFileName = "Manifest.plist"
     static let stateFileName = "State.vzvmsave"
+    static let qemuStateFileName = "State.qemustate"
     static let configurationFileName = "Configuration.plist"
     static let screenshotFileName = "Screenshot.heic"
     static let resourcesDirectoryName = "Resources"
@@ -238,6 +249,20 @@ struct SavedSessionLayout: Sendable {
 }
 
 // MARK: - Errors
+
+/// How QEMU was started for a session that was saved with it, which has to be the same to restore the session.
+struct QEMUSavedSessionDescription: Codable, Hashable, Sendable {
+    /// The version of QEMU that saved the session, such as `11.1.2`.
+    var qemuVersion: String
+    /// The versioned machine type the session was saved with, such as `virt-11.1`. Newer versions of QEMU can restore
+    /// sessions saved with older machine types, as long as they're started with the same one.
+    var machineType: String
+    var displayAdapter: QEMULaunchConfiguration.DisplayAdapter
+    /// Whether the drivers disk was attached, which then has to be attached again as it was.
+    var hasDriversDisk: Bool
+    /// QEMU's arguments, without anything that's allowed to change between runs. See ``QEMULaunchConfiguration/comparableArguments()``.
+    var arguments: [String]
+}
 
 public enum SavedSessionError: LocalizedError {
     case notEligible(SavedSessionEligibility.Issue)

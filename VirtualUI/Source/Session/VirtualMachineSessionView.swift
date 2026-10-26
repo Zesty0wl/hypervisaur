@@ -342,12 +342,19 @@ public struct VirtualMachineSessionView: View {
         .ignoresSafeArea()
     }
 
-    /// Closing the window saves the virtual machine (or shuts it down when it can't be saved) before the window goes away.
+    /// Closing the window saves the virtual machine (or shuts it down when it can't be saved) before the window goes away,
+    /// unless the virtual machine is to keep running in the background.
     private var confirmBeforeClosing: () async -> Bool {
         { [weak ui] in
             guard let ui else { return true }
 
-            return await ui.requestClose()
+            let outcome = await ui.requestClose()
+
+            if outcome == .keptRunning {
+                await ui.prepareForBackground()
+            }
+
+            return outcome.allowsClosingWindow
         }
     }
 

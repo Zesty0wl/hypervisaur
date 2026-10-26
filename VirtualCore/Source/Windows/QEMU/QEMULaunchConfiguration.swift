@@ -7,9 +7,17 @@ struct QEMULaunchConfiguration {
         var displaySocket: URL
         var tpmSocket: URL
         var agentSocket: URL
+
+        /// Stands in for the sockets' locations, which are different each time QEMU starts.
+        static let placeholder = RuntimePaths(
+            monitorSocket: URL(fileURLWithPath: "/$RUNTIME/qmp.sock"),
+            displaySocket: URL(fileURLWithPath: "/$RUNTIME/vnc.sock"),
+            tpmSocket: URL(fileURLWithPath: "/$RUNTIME/tpm.sock"),
+            agentSocket: URL(fileURLWithPath: "/$RUNTIME/agent.sock")
+        )
     }
 
-    enum DisplayAdapter: Equatable {
+    enum DisplayAdapter: String, Codable, Equatable, Sendable {
         /// A framebuffer that the firmware and Windows can use without drivers, at a fixed size.
         case framebuffer
         /// A virtio GPU, which Windows can only use with its driver. Windows uses the size it has when Windows starts.
@@ -22,6 +30,16 @@ struct QEMULaunchConfiguration {
     var installDiskURL: URL?
     var driversDiskURL: URL?
     var displayAdapter = DisplayAdapter.framebuffer
+    /// The machine type, which is pinned to the version a saved session was saved with when restoring it.
+    var machineType = Self.defaultMachineType
+    /// Whether QEMU waits for a saved session's state to be loaded through its monitor instead of booting.
+    var restoresSavedState = false
+    /// Whether the sound device is attached when QEMU starts. It can't be saved with a session, so it's unplugged
+    /// before saving and plugged in again once a session has been restored. See ``soundDeviceProperties``.
+    var attachesSoundDevice = true
+
+    /// QEMU's current version of the machine type.
+    static let defaultMachineType = "virt"
 
     /// The size of the virtio GPU's display when Windows starts.
     static let virtioGPUDisplaySizeRange = (width: 640...7680, height: 480...4320)
@@ -41,7 +59,7 @@ struct QEMULaunchConfiguration {
             /// A virtual machine must not outlive the app, for example if it crashes. swtpm exits by itself when QEMU does.
             "-run-with", "exit-with-parent=on",
             "-nodefaults",
-            "-machine", "virt",
+            "-machine", machineType,
             "-accel", "hvf",
             "-cpu", "host",
             "-smp", "\(hardware.cpuCount)",
@@ -111,6 +129,33 @@ struct QEMULaunchConfiguration {
             /// The guest starts once the display is connected, so that nothing that's shown during boot is missed.
             "-S",
         ]
+
+        if restoresSavedState {
+            arguments += ["-incoming", "defer"]
+        }
+
+        return arguments
+    }
+
+    /// QEMU's arguments for booting the virtual machine, without anything that's allowed to change between runs: where the
+    /// virtual machine and QEMU's sockets are, and its name. A saved session can only be restored with the same arguments.
+    func comparableArguments() throws -> [String] {
+        var configuration = self
+        configuration.runtimePaths = .placeholder
+        configuration.machineType = Self.defaultMachineType
+        configuration.restoresSavedState = false
+        configuration.attachesSoundDevice = true
+
+        let bundlePath = model.bundleURL.path
+        var arguments = try configuration.arguments().map { argument in
+            argument
+                .replacingOccurrences(of: bundlePath.qemuOptionEscaped, with: "$BUNDLE")
+                .replacingOccurrences(of: bundlePath, with: "$BUNDLE")
+        }
+
+        if let index = arguments.firstIndex(of: "-name"), arguments.indices.contains(index + 1) {
+            arguments[index + 1] = "$NAME"
+        }
 
         return arguments
     }
@@ -184,13 +229,28 @@ struct QEMULaunchConfiguration {
         return arguments
     }
 
-    private func audioArguments() -> [String] {
-        guard model.configuration.hardware.soundDevices.contains(where: \.enableOutput) else { return [] }
+    /// Whether the virtual machine has a sound device.
+    static func hasSoundDevice(_ model: VBVirtualMachine) -> Bool {
+        model.configuration.hardware.soundDevices.contains(where: \.enableOutput)
+    }
 
-        return [
-            "-audiodev", "coreaudio,id=audio0",
-            "-device", "usb-audio,bus=xhci.0,audiodev=audio0",
-        ]
+    /// The sound device's properties for plugging it in with QEMU's `device_add` command.
+    static var soundDeviceProperties: [String: Any] {
+        ["driver": "usb-audio", "id": soundDeviceID, "bus": "xhci.0", "audiodev": "audio0"]
+    }
+
+    static let soundDeviceID = "sound0"
+
+    private func audioArguments() -> [String] {
+        guard Self.hasSoundDevice(model) else { return [] }
+
+        var arguments = ["-audiodev", "coreaudio,id=audio0"]
+
+        if attachesSoundDevice {
+            arguments += ["-device", "usb-audio,id=\(Self.soundDeviceID),bus=xhci.0,audiodev=audio0"]
+        }
+
+        return arguments
     }
 
     /// NVMe serial numbers are limited to 20 characters.

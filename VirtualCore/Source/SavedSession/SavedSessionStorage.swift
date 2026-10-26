@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import OSLog
 
 /// Everything needed to capture a session, gathered while the virtual machine is still running.
@@ -17,10 +18,16 @@ struct SavedSessionCapturePlan: @unchecked Sendable {
     var resources: [ResourceSource]
     /// The configuration that was used to construct the running virtual machine.
     var configuration: VBMacConfiguration
-    var runtimeDescription: SavedSessionRuntimeDescription
+    var runtimeDescription: SavedSessionRuntimeDescription?
     var screenshotSourceURL: URL?
     var wasPausedBeforeSave: Bool
     var memorySize: UInt64
+    /// How QEMU was started, for virtual machines that run with it.
+    var qemuDescription: QEMUSavedSessionDescription? = nil
+    /// What the engine's memory and device state file is called in the package.
+    var stateFileName = SavedSessionLayout.stateFileName
+    /// A picture of the display to save with the session, in place of ``screenshotSourceURL``.
+    var screenshotImage: CGImage? = nil
 }
 
 /// A package that's being built in a private staging directory.
@@ -30,8 +37,8 @@ struct SavedSessionStagedCapture: Sendable {
     let resources: [SavedSessionManifest.Resource]
     let screenshotFileName: String?
 
-    /// Where the framework must write the memory and device state.
-    var stateFileURL: URL { stagingURL.appending(path: SavedSessionLayout.stateFileName) }
+    /// Where the engine must write the memory and device state.
+    var stateFileURL: URL { stagingURL.appending(path: plan.stateFileName) }
 }
 
 /// What the virtual machine needs in order to be restored.
@@ -177,10 +184,18 @@ struct SavedSessionStorage: Sendable {
             try fileSystem.writeDurably(configurationData, to: stagingURL.appending(path: SavedSessionLayout.configurationFileName))
 
             var screenshotFileName: String?
-            if let screenshotURL = plan.screenshotSourceURL, fileSystem.exists(screenshotURL) {
-                /// A screenshot is only presentation, failing to copy one must not fail the save.
+            let screenshotDestination = stagingURL.appending(path: SavedSessionLayout.screenshotFileName)
+            /// A screenshot is only presentation, failing to save one must not fail the save.
+            if let image = plan.screenshotImage {
                 do {
-                    try fileSystem.clone(from: screenshotURL, to: stagingURL.appending(path: SavedSessionLayout.screenshotFileName))
+                    try fileSystem.writeDurably(try image.vb_heicEncodedData(options: NSImage.defaultThumbnailProperties), to: screenshotDestination)
+                    screenshotFileName = SavedSessionLayout.screenshotFileName
+                } catch {
+                    logger.warning("Failed to write screenshot into saved session: \(error, privacy: .public)")
+                }
+            } else if let screenshotURL = plan.screenshotSourceURL, fileSystem.exists(screenshotURL) {
+                do {
+                    try fileSystem.clone(from: screenshotURL, to: screenshotDestination)
                     screenshotFileName = SavedSessionLayout.screenshotFileName
                 } catch {
                     logger.warning("Failed to copy screenshot into saved session: \(error, privacy: .public)")
@@ -200,24 +215,25 @@ struct SavedSessionStorage: Sendable {
     func publish(_ staged: SavedSessionStagedCapture) throws -> VBSavedSessionDescriptor {
         do {
             guard let stateSize = fileSystem.byteCount(of: staged.stateFileURL), stateSize > 0 else {
-                throw SavedSessionError.missingResource(SavedSessionLayout.stateFileName)
+                throw SavedSessionError.missingResource(staged.plan.stateFileName)
             }
             try fileSystem.synchronizeFile(staged.stateFileURL)
 
             let manifest = SavedSessionManifest(
-                formatVersion: SavedSessionManifest.currentFormatVersion,
+                formatVersion: staged.plan.qemuDescription == nil ? SavedSessionManifest.virtualizationFormatVersion : SavedSessionManifest.qemuFormatVersion,
                 id: staged.plan.sessionID,
                 date: .now,
                 appVersion: Bundle.main.vbShortVersionString,
                 appBuild: Bundle.main.vbBuild,
                 hostECID: hostECID,
                 hostOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
-                stateFileName: SavedSessionLayout.stateFileName,
+                stateFileName: staged.plan.stateFileName,
                 stateFileByteCount: stateSize,
                 configurationFileName: SavedSessionLayout.configurationFileName,
                 screenshotFileName: staged.screenshotFileName,
                 resources: staged.resources,
                 runtimeDescription: staged.plan.runtimeDescription,
+                qemuDescription: staged.plan.qemuDescription,
                 wasPausedBeforeSave: staged.plan.wasPausedBeforeSave
             )
 

@@ -23,7 +23,7 @@ extension VirtualMachineSessionUI {
     var canCapture: Bool { displayedRuntime != nil }
 
     @MainActor
-    private var captureRegion: VMCaptureRegion? {
+    var captureRegion: VMCaptureRegion? {
         displayView.flatMap(VMCaptureRegion.init(view:))
     }
 

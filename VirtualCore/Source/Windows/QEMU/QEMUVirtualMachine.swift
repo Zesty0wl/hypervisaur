@@ -44,6 +44,20 @@ public final class QEMUVirtualMachine: ObservableObject {
     private var didReportStop = false
     private var isRestarting = false
 
+    /// The machine type QEMU was started with, which stays pinned to a saved session's once it has been restored.
+    private var machineType = QEMULaunchConfiguration.defaultMachineType
+    /// Whether the sound device is unplugged, because the state was saved or restored. It's plugged in again when the guest resumes.
+    private var isSoundDeviceUnplugged = false
+
+    /// What's needed to start the virtual machine from a saved session instead of booting it.
+    struct Restoration {
+        var stateFileURL: URL
+        var machineType: String
+    }
+
+    /// Windows Setup runs from the installer, which is only attached until Windows has been installed.
+    var isInstallerAttached: Bool { installDiskURL != nil }
+
     init(model: VBVirtualMachine, installDiskURL: URL?, driversDiskURL: URL?, displayAdapter: QEMULaunchConfiguration.DisplayAdapter) {
         self.model = model
         self.installDiskURL = installDiskURL
@@ -84,7 +98,8 @@ public final class QEMUVirtualMachine: ObservableObject {
 
     // MARK: - Lifecycle
 
-    func start() async throws {
+    /// Boots the virtual machine, or starts it from a saved session's state and leaves it paused.
+    func start(restoring restoration: Restoration? = nil) async throws {
         guard state == .stopped else { return }
 
         state = .starting
@@ -92,8 +107,8 @@ public final class QEMUVirtualMachine: ObservableObject {
         didReportStop = false
 
         do {
-            try await launch()
-            state = .running
+            try await launch(restoring: restoration)
+            state = restoration == nil ? .running : .paused
         } catch {
             logger.error("Failed to start: \(error, privacy: .public)")
             await tearDown()
@@ -112,6 +127,15 @@ public final class QEMUVirtualMachine: ObservableObject {
         guard state == .paused, let monitor else { return }
         try await monitor.execute("cont")
         state = .running
+
+        if isSoundDeviceUnplugged {
+            do {
+                try await monitor.execute("device_add", arguments: QEMULaunchConfiguration.soundDeviceProperties)
+                isSoundDeviceUnplugged = false
+            } catch {
+                logger.error("Couldn't plug the sound device in again: \(error, privacy: .public)")
+            }
+        }
     }
 
     /// Presses the virtual machine's power button so that the guest can shut down.
@@ -195,8 +219,10 @@ public final class QEMUVirtualMachine: ObservableObject {
         reportStop(error: nil)
     }
 
-    private func launch() async throws {
+    private func launch(restoring restoration: Restoration? = nil) async throws {
         let toolchain = try QEMUToolchain.current()
+
+        machineType = restoration?.machineType ?? QEMULaunchConfiguration.defaultMachineType
 
         try await prepareBundle(toolchain: toolchain)
 
@@ -210,7 +236,7 @@ public final class QEMUVirtualMachine: ObservableObject {
             agentSocket: runtimeDirectoryURL.appending(path: "agent.sock")
         )
 
-        let configuration = QEMULaunchConfiguration(
+        var configuration = QEMULaunchConfiguration(
             model: model,
             toolchain: toolchain,
             runtimePaths: paths,
@@ -218,6 +244,10 @@ public final class QEMUVirtualMachine: ObservableObject {
             driversDiskURL: driversDiskURL,
             displayAdapter: displayAdapter
         )
+        configuration.machineType = machineType
+        configuration.restoresSavedState = restoration != nil
+        /// The sound device can't be part of a saved state, so it's plugged in once the restored guest resumes.
+        configuration.attachesSoundDevice = restoration == nil
         let arguments = try configuration.arguments()
 
         try launchTPM(toolchain: toolchain, socketURL: paths.tpmSocket)
@@ -252,7 +282,165 @@ public final class QEMUVirtualMachine: ObservableObject {
 
         try await startGuestAgent(socketURL: paths.agentSocket)
 
-        try await monitor.execute("cont")
+        if let restoration {
+            try await loadState(from: restoration.stateFileURL, monitor: monitor)
+            isSoundDeviceUnplugged = QEMULaunchConfiguration.hasSoundDevice(model)
+        } else {
+            isSoundDeviceUnplugged = false
+            try await monitor.execute("cont")
+        }
+    }
+
+    // MARK: - Saved Sessions
+
+    /// QEMU's arguments for booting this virtual machine as it's set up now, without anything that may change between runs.
+    /// See ``QEMULaunchConfiguration/comparableArguments()``.
+    func comparableArguments() throws -> [String] {
+        try QEMULaunchConfiguration(
+            model: model,
+            toolchain: try QEMUToolchain.current(),
+            runtimePaths: .placeholder,
+            installDiskURL: installDiskURL,
+            driversDiskURL: driversDiskURL,
+            displayAdapter: displayAdapter
+        ).comparableArguments()
+    }
+
+    /// Describes how QEMU was started, which restoring the state saved by ``saveState(to:)`` depends on.
+    func savedSessionDescription() async throws -> QEMUSavedSessionDescription {
+        let monitor = try requireMonitor()
+
+        let version = try await monitor.execute("query-version") as? [String: Any]
+        let numbers = version?["qemu"] as? [String: Any]
+        let qemuVersion = ["major", "minor", "micro"].map { "\(numbers?[$0] as? Int ?? 0)" }.joined(separator: ".")
+
+        return QEMUSavedSessionDescription(
+            qemuVersion: qemuVersion,
+            machineType: try await versionedMachineType(monitor: monitor),
+            displayAdapter: displayAdapter,
+            hasDriversDisk: driversDiskURL != nil,
+            arguments: try comparableArguments()
+        )
+    }
+
+    /// The machine type is pinned to the version it's an alias of, such as `virt-11.1`, so that a newer QEMU
+    /// restores the state with the same hardware.
+    private func versionedMachineType(monitor: QMPClient) async throws -> String {
+        guard machineType == QEMULaunchConfiguration.defaultMachineType else { return machineType }
+
+        let machines = try await monitor.execute("query-machines") as? [[String: Any]] ?? []
+
+        guard let machine = machines.first(where: { $0["alias"] as? String == machineType }), let name = machine["name"] as? String else {
+            throw Failure("QEMU didn’t say which version of the \(machineType) machine it’s running.")
+        }
+
+        return name
+    }
+
+    /// Saves the paused virtual machine's memory and device state to a file. The disks aren't part of it: they're saved separately.
+    ///
+    /// The sound device can't be saved, so it's unplugged first, and plugged in again when the guest resumes. Cancelling
+    /// stops the save and leaves the virtual machine paused.
+    func saveState(to url: URL) async throws {
+        guard state == .paused else { throw Failure("The virtual machine has to be paused to save its state.") }
+
+        let monitor = try requireMonitor()
+        let runtimeDirectoryURL = try runtimeDirectoryURL.require("QEMU’s runtime directory is unavailable.")
+
+        if QEMULaunchConfiguration.hasSoundDevice(model), !isSoundDeviceUnplugged {
+            try await unplugSoundDevice(monitor: monitor)
+        }
+
+        let link = try Self.migrationFileLink(to: url, in: runtimeDirectoryURL)
+        defer { try? FileManager.default.removeItem(at: link) }
+
+        logger.debug("Saving state to \(url.path, privacy: .public)")
+
+        try await monitor.execute("migrate", arguments: ["uri": "file:\(link.path)"])
+
+        try await waitForMigration(monitor: monitor)
+    }
+
+    private func unplugSoundDevice(monitor: QMPClient) async throws {
+        try await monitor.execute("device_del", arguments: ["id": QEMULaunchConfiguration.soundDeviceID])
+        isSoundDeviceUnplugged = true
+
+        /// USB devices are removed right away, without the guest's help, but the removal is still reported asynchronously.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            let devices = try await monitor.execute("qom-list", arguments: ["path": "/machine/peripheral"]) as? [[String: Any]] ?? []
+            if !devices.contains(where: { $0["name"] as? String == QEMULaunchConfiguration.soundDeviceID }) { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        throw Failure("The sound device couldn’t be unplugged to save the virtual machine’s state.")
+    }
+
+    private func waitForMigration(monitor: QMPClient) async throws {
+        while true {
+            if Task.isCancelled {
+                _ = try? await monitor.execute("migrate_cancel")
+                throw CancellationError()
+            }
+
+            let info = try await monitor.execute("query-migrate") as? [String: Any]
+
+            switch info?["status"] as? String {
+            case "completed":
+                return
+            case "failed":
+                throw Failure("QEMU couldn’t save the virtual machine’s state. \(info?["error-desc"] as? String ?? "")")
+            case "cancelled":
+                throw CancellationError()
+            default:
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    /// Loads a saved session's state into QEMU, which was started to wait for it, and leaves the virtual machine paused.
+    private func loadState(from url: URL, monitor: QMPClient) async throws {
+        let runtimeDirectoryURL = try runtimeDirectoryURL.require("QEMU’s runtime directory is unavailable.")
+        let link = try Self.migrationFileLink(to: url, in: runtimeDirectoryURL)
+        defer { try? FileManager.default.removeItem(at: link) }
+
+        logger.debug("Loading state from \(url.path, privacy: .public)")
+
+        do {
+            try await monitor.execute("migrate-incoming", arguments: ["uri": "file:\(link.path)"])
+
+            /// The state loads in the background, and QEMU exits if it can't be loaded.
+            while true {
+                let status = (try await monitor.execute("query-status") as? [String: Any])?["status"] as? String
+
+                switch status {
+                case "inmigrate":
+                    try await Task.sleep(for: .milliseconds(100))
+                case "paused":
+                    return
+                default:
+                    throw Failure("QEMU is \(status ?? "in an unknown state") instead of paused after loading the saved state.")
+                }
+            }
+        } catch {
+            if let qemuProcess, !qemuProcess.isRunning {
+                throw Failure("QEMU couldn’t load the saved state. \(recentLogOutput)")
+            }
+            throw error
+        }
+    }
+
+    /// QEMU takes options after a comma in a file's URI, so the file is reached through a link whose path has no commas.
+    private static func migrationFileLink(to url: URL, in runtimeDirectoryURL: URL) throws -> URL {
+        let link = runtimeDirectoryURL.appending(path: "state")
+        try? FileManager.default.removeItem(at: link)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: url)
+        return link
+    }
+
+    private func requireMonitor() throws -> QMPClient {
+        guard let monitor else { throw Failure("The connection to QEMU is unavailable.") }
+        return monitor
     }
 
     /// Connects to the agent's port and lets programs on the Mac reach it. The agent replies once Windows has started it.

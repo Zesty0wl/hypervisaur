@@ -703,7 +703,7 @@ public final class VMInstance: NSObject, ObservableObject {
     ///
     /// Nothing is generated or replaced during restoration: the identity and storage have been installed by the saved session
     /// transaction and the configuration is the one that was captured when the session was saved.
-    func restoreSession(_ preparation: SavedSessionRestorePreparation, onConstructed: (VZVirtualMachine) -> Void) async throws {
+    func restoreSession(_ preparation: SavedSessionRestorePreparation, onConstructed: (VMRuntime) -> Void) async throws {
         if preparation.guestAdditionsMediaURL != nil, VirtualBuddyManagedPreferences.guestAppDisabled {
             throw SavedSessionError.policyBlocksResume("The guest app disk image was attached when this session was saved, but it's now disabled by your organization. Discard the saved session to start this virtual machine.")
         }
@@ -719,7 +719,11 @@ public final class VMInstance: NSObject, ObservableObject {
             let vm = try ensureVM()
             let configuration = try runtimeConfiguration.require("The VM configuration is unavailable.")
 
-            if let difference = SavedSessionRuntimeDescription(configuration: configuration).firstDifference(from: preparation.manifest.runtimeDescription) {
+            guard let savedDescription = preparation.manifest.runtimeDescription else {
+                throw SavedSessionError.invalidManifest("The saved session wasn’t made for a virtual machine that runs with Virtualization.")
+            }
+
+            if let difference = SavedSessionRuntimeDescription(configuration: configuration).firstDifference(from: savedDescription) {
                 throw SavedSessionError.configurationChanged(difference)
             }
 
@@ -732,7 +736,7 @@ public final class VMInstance: NSObject, ObservableObject {
                 throw SavedSessionError.policyBlocksResume("Microphone input is disabled by your organization, but it was enabled when this session was saved and can't be turned off without restarting. Discard the saved session to start this virtual machine without microphone input.")
             }
 
-            onConstructed(vm)
+            onConstructed(.virtualization(vm))
 
             enforceSharedFoldersPolicy()
 

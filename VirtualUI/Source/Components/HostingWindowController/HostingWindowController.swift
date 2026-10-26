@@ -118,6 +118,14 @@ public final class HostingWindowController<Content>: NSWindowController, NSWindo
             (window as? HostingWindow)?.confirmBeforeClosingCallback = newValue
         }
     }
+
+    /// Closes the window without going through ``confirmBeforeClosingCallback``, unless a request to close is already waiting for it.
+    func closeWithoutConfirmation() {
+        guard let hostingWindow = window as? HostingWindow else {
+            preconditionFailure("closeWithoutConfirmation can't be used with custom window types in HostingWindowController")
+        }
+        hostingWindow.closeUnlessWaitingForConfirmation()
+    }
     
 }
 
@@ -127,6 +135,7 @@ protocol WindowChromeConsumer: AnyObject {
     var viewRendersWindowChrome: Bool { get set }
     var onWindowOcclusionStateChanged: ((NSWindow.OcclusionState) -> Void)? { get set }
     var confirmBeforeClosingCallback: () async -> Bool { get set }
+    func closeWithoutConfirmation()
 }
 
 fileprivate final class HostingWindow: VBRestorableWindow {
@@ -162,6 +171,12 @@ fileprivate final class HostingWindow: VBRestorableWindow {
             guard await confirmBeforeClosingCallback() else { return }
             closeWithoutConfirmation()
         }
+    }
+
+    /// The request to close that's waiting for its confirmation decides whether the window closes.
+    func closeUnlessWaitingForConfirmation() {
+        guard !isWaitingForCloseConfirmation else { return }
+        closeWithoutConfirmation()
     }
 
     private func closeWithoutConfirmation() {

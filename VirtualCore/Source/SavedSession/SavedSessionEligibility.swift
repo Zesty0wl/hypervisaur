@@ -11,11 +11,12 @@ public struct SavedSessionEligibility: Hashable, Sendable {
         case specialBootMode(String)
         case usbDeviceAttached
         case runtimeConfigurationUnsupported(String)
+        case windowsSetupInProgress
 
         public var explanation: String {
             switch self {
             case .unsupportedGuest:
-                "Saving the session is only available for macOS virtual machines."
+                "Saving the session is only available for macOS and Windows virtual machines."
             case .installationIncomplete:
                 "Saving the session isn't available until the operating system has been installed."
             case .externalDiskImage(let name):
@@ -28,6 +29,8 @@ public struct SavedSessionEligibility: Hashable, Sendable {
                 "Saving the session isn't available while a USB device is attached to the virtual machine. Detach it to save the session."
             case .runtimeConfigurationUnsupported(let reason):
                 "This virtual machine's configuration doesn't support saving its session. \(reason)"
+            case .windowsSetupInProgress:
+                "Saving the session isn't available while Windows Setup is running."
             }
         }
     }

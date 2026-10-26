@@ -52,6 +52,37 @@ public enum VMScreenCapture {
         return try await screenshot(of: region)
     }
 
+    /// A small picture of the virtual machine's display, for showing what it's doing at a glance.
+    ///
+    /// Unlike ``screenshot(of:in:)``, this never asks for anything: guests that are captured from their window only get a
+    /// preview while it's on screen, and only once Hypervisaur is allowed to record the screen.
+    /// - Returns: `nil` when there's nothing to show yet, or the display can't be captured without asking.
+    @MainActor
+    public static func preview(of runtime: VMRuntime, in region: VMCaptureRegion?, maxPixelSize: Int = previewMaxPixelSize) async -> CGImage? {
+        if let machine = runtime.qemuMachine {
+            guard let frame = machine.latestFrame else { return nil }
+            return try? await performOffMainActor { frame.vb_scaledToFit(maxPixelSize: maxPixelSize) }
+        }
+
+        guard let region, CGPreflightScreenCaptureAccess() else { return nil }
+
+        do {
+            let filter = try await contentFilter(for: region)
+
+            let configuration = SCStreamConfiguration()
+            let scale = min(CGFloat(filter.pointPixelScale), CGFloat(maxPixelSize) / max(region.rect.width, region.rect.height))
+            configure(configuration, for: region, scale: scale)
+            configuration.showsCursor = false
+
+            return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+        } catch {
+            return nil
+        }
+    }
+
+    /// The size of the longest side of previews, in pixels, which is plenty for the library.
+    public static let previewMaxPixelSize = 640
+
     /// A screenshot of part of a window, without the pointer.
     public static func screenshot(of region: VMCaptureRegion) async throws -> CGImage {
         let filter = try await contentFilter(for: region)
@@ -143,5 +174,31 @@ public enum VMCaptureLocation {
             number += 1
         }
         return url
+    }
+}
+
+private extension CGImage {
+    /// The image at a size whose longest side is at most the given number of pixels, or the image itself when it's already that small.
+    func vb_scaledToFit(maxPixelSize: Int) -> CGImage? {
+        let longestSide = max(width, height)
+        guard longestSide > maxPixelSize else { return self }
+
+        let scale = CGFloat(maxPixelSize) / CGFloat(longestSide)
+        let size = CGSize(width: (CGFloat(width) * scale).rounded(), height: (CGFloat(height) * scale).rounded())
+
+        guard let context = CGContext(
+            data: nil,
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+
+        context.interpolationQuality = .high
+        context.draw(self, in: CGRect(origin: .zero, size: size))
+
+        return context.makeImage()
     }
 }

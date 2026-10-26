@@ -58,6 +58,34 @@ public struct VMArtworkView: View {
     }
 }
 
+/// What a running virtual machine's display shows, blurred just enough that the icon of its operating system stands out on top.
+struct VMLivePreviewArtworkView: View {
+    var image: CGImage
+    var systemType: VBGuestType
+    var iconSize: CGFloat = 44
+
+    var body: some View {
+        ZStack {
+            Image(decorative: image, scale: 1)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .blur(radius: 4, opaque: true)
+                .brightness(-0.1)
+                .clipped()
+
+            systemType.icon
+                .resizable()
+                .foregroundStyle(.white)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: iconSize, height: iconSize)
+                /// A dark halo keeps the icon legible on bright displays, and a soft glow lifts it off dark ones.
+                .shadow(color: .black.opacity(0.6), radius: 6)
+                .shadow(color: .white.opacity(0.45), radius: 12)
+        }
+    }
+}
+
 private extension VBVirtualMachine {
     var artworkContent: VMArtworkView.Content {
         if let savedScreenshot {
@@ -106,5 +134,14 @@ private struct PreviewWrapper: View {
 
 #Preview("Linux - None") {
     PreviewWrapper(virtualMachine: .previewLinuxNoArtwork)
+}
+
+#Preview("Mac - Live Preview") {
+    if let image = VBVirtualMachine.preview.thumbnail?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+        VMLivePreviewArtworkView(image: image, systemType: .mac)
+            .frame(width: 480, height: 270)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(32)
+    }
 }
 #endif

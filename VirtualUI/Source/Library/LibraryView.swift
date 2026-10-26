@@ -39,6 +39,9 @@ public struct LibraryView: View {
     /// The defaults flag itself is not read again, but this is set whenever a non-empty library state is shown.
     @State private var canShowFirstLaunchExperience = true
 
+    /// Previews of running virtual machines are only taken while somebody can see them.
+    @State private var isLibraryVisible = false
+
     private var shouldShowFirstLaunchExperienceOnEmptyLibrary: Bool {
         guard #available(macOS 15.0, *) else { return false }
         return canShowFirstLaunchExperience && (!hasSeenFirstLaunchExperience || UserDefaults.standard.bool(forKey: "VBForceFirstLaunchExperience"))
@@ -141,6 +144,16 @@ public struct LibraryView: View {
             }
             /// Running virtual machines show what they're using while the library is open.
             .task { await library.activityMonitor.observe() }
+            /// And what's on their display, while the library is on screen.
+            .onWindowVisibilityChange { isLibraryVisible = $0 }
+            .task(id: isLibraryVisible) {
+                guard isLibraryVisible else { return }
+
+                while !Task.isCancelled {
+                    await sessionManager.refreshPreviews()
+                    try? await Task.sleep(for: VMLivePreview.refreshInterval)
+                }
+            }
             /// Brings a virtual machine that was just duplicated into view.
             .onChange(of: library.recentlyDuplicatedMachineIdentifier) { _, identifier in
                 guard let identifier else { return }

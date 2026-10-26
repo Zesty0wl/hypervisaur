@@ -16,6 +16,8 @@ public enum VMCloseBehavior: String, CaseIterable, Identifiable, Sendable {
     case ask
     /// Saves the state of virtual machines that support it.
     case saveState
+    /// Closes the window and leaves the virtual machine running in the background.
+    case keepRunning
     /// Shuts the virtual machine down.
     case shutDown
 
@@ -25,6 +27,7 @@ public enum VMCloseBehavior: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .ask: "Ask every time"
         case .saveState: "Save state"
+        case .keepRunning: "Keep running in background"
         case .shutDown: "Shutdown"
         }
     }
@@ -60,6 +63,10 @@ public struct VBSettings: Hashable, Sendable {
     /// What to do when the window of a running virtual machine is closed.
     public var closeBehavior: VMCloseBehavior
 
+    /// Whether virtual machines that run in the background, and the Mac they run on, are kept from going to sleep.
+    /// See ``VMSleepPrevention``.
+    public var keepsBackgroundVirtualMachinesAwake: Bool
+
     /// Enables using the new ASIF format for boot disk images (requires macOS 26+ host).
     public var bootDiskImagesUseASIF: Bool
 
@@ -76,6 +83,7 @@ extension VBSettings {
     static let defaultEnableTSSCheck = true
     static let defaultShowDesktopPictureThumbnails = false
     static let defaultCloseBehavior = VMCloseBehavior.ask
+    static let defaultKeepsBackgroundVirtualMachinesAwake = false
     static let defaultBootDiskImagesUseASIF: Bool = {
         if #available(macOS 26, *) {
             true
@@ -91,6 +99,7 @@ extension VBSettings {
         self.showDesktopPictureThumbnails = Self.defaultShowDesktopPictureThumbnails
         self.bootDiskImagesUseASIF = Self.defaultBootDiskImagesUseASIF
         self.closeBehavior = Self.defaultCloseBehavior
+        self.keepsBackgroundVirtualMachinesAwake = Self.defaultKeepsBackgroundVirtualMachinesAwake
         self.isLibraryInRemovableVolume = false
     }
 
@@ -108,6 +117,7 @@ extension VBSettings {
         static let showDesktopPictureThumbnails = "showDesktopPictureThumbnails"
         static let bootDiskImagesUseASIF = "bootDiskImagesUseASIF"
         static let closeBehavior = "closeBehavior"
+        static let keepsBackgroundVirtualMachinesAwake = "keepsBackgroundVirtualMachinesAwake"
         static let isLibraryInRemovableVolume = "isLibraryInRemovableVolume"
     }
 
@@ -121,6 +131,7 @@ extension VBSettings {
         self.showDesktopPictureThumbnails = defaults.bool(forKey: Keys.showDesktopPictureThumbnails)
         self.bootDiskImagesUseASIF = defaults.bool(forKey: Keys.bootDiskImagesUseASIF)
         self.closeBehavior = defaults.string(forKey: Keys.closeBehavior).flatMap(VMCloseBehavior.init(rawValue:)) ?? Self.defaultCloseBehavior
+        self.keepsBackgroundVirtualMachinesAwake = defaults.bool(forKey: Keys.keepsBackgroundVirtualMachinesAwake)
         self.isLibraryInRemovableVolume = defaults.bool(forKey: Keys.isLibraryInRemovableVolume)
 
         if let path = defaults.string(forKey: Keys.libraryPath) {
@@ -169,6 +180,7 @@ extension VBSettings {
         defaults.set(showDesktopPictureThumbnails, forKey: Keys.showDesktopPictureThumbnails)
         defaults.set(bootDiskImagesUseASIF, forKey: Keys.bootDiskImagesUseASIF)
         defaults.set(closeBehavior.rawValue, forKey: Keys.closeBehavior)
+        defaults.set(keepsBackgroundVirtualMachinesAwake, forKey: Keys.keepsBackgroundVirtualMachinesAwake)
         defaults.set(isLibraryInRemovableVolume, forKey: Keys.isLibraryInRemovableVolume)
     }
 

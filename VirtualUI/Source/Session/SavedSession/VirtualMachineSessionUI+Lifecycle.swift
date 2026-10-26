@@ -23,8 +23,8 @@ final class SessionAlertPrompts: SessionClosePrompting {
 
     var closeBehavior: VMCloseBehavior { SavedSessionPrompts.closeBehavior }
 
-    func chooseCloseAction(context: SessionCloseContext) async -> SessionCloseChoice? {
-        await SavedSessionPrompts.chooseCloseAction(machines: [name], quitting: context.isQuitting, from: window)
+    func chooseCloseAction(eligibility: SavedSessionEligibility, context: SessionCloseContext) async -> SessionCloseChoice? {
+        await SavedSessionPrompts.chooseCloseAction(machines: [name], eligibility: eligibility, quitting: context.isQuitting, from: window)
     }
 
     func confirmShutDownInsteadOfSaving(reason: String?, context: SessionCloseContext) async -> Bool {
@@ -58,19 +58,64 @@ extension VirtualMachineSessionUI {
     // MARK: Closing
 
     /// Saves the virtual machine (or shuts it down if saving isn't available), so that its window can close or the app can quit.
-    /// See ``SessionCloseCoordinator``.
-    func requestClose(context: SessionCloseContext = .window) async -> Bool {
+    /// Closing the window may leave the virtual machine running in the background instead. See ``SessionCloseCoordinator``.
+    func requestClose(context: SessionCloseContext = .window) async -> SessionCloseOutcome {
         await closer.requestClose(context: context)
     }
 
     /// Whether closing this session involves stopping a virtual machine.
     var needsStoppingBeforeClose: Bool { closer.needsStoppingBeforeClose }
 
-    /// Saves the session and closes the window.
+    /// Saves the session and closes the window, if it has one.
     func saveAndClose() async {
-        guard await requestClose(context: .saveAndClose) else { return }
+        guard await requestClose(context: .saveAndClose) == .stopped else { return }
 
         hostWindow?.close()
+    }
+
+    // MARK: Running in the Background
+
+    /// Whether the window can close while the virtual machine carries on running without it.
+    var canRunInBackground: Bool {
+        hostWindow != nil && (controller.state.isRunning || controller.state.isPaused) && !closer.isClosing
+    }
+
+    /// Closes the window without asking anything, leaving the virtual machine running in the background.
+    /// Opening the virtual machine from the library shows its window again.
+    func runInBackground() async {
+        guard canRunInBackground else { return }
+
+        await prepareForBackground()
+
+        guard canRunInBackground, let hostWindow else { return }
+
+        (hostWindow.windowController as? WindowChromeConsumer)?.closeWithoutConfirmation()
+    }
+
+    /// Virtual machines that are captured from their window can't be captured without it, so the library gets
+    /// a last preview of what they show before the window closes.
+    func prepareForBackground() async {
+        await refreshPreview()
+    }
+
+    /// Lets go of everything that belongs to the window once it has closed, while the session itself may carry on in the background.
+    func windowDidClose() {
+        hostWindow = nil
+        displayView = nil
+
+        /// Recordings capture the window, so they end with it.
+        if recording != nil {
+            Task { await stopRecording() }
+        }
+    }
+
+    /// Asks the guest to shut down, for virtual machines that don't have a window to do it from.
+    func shutDown() async {
+        do {
+            try await controller.stop()
+        } catch {
+            NSApp.presentError(error)
+        }
     }
 
     func forceStopAfterConfirmation() async {

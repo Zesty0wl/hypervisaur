@@ -5,6 +5,10 @@ import VirtualCore
 struct LibraryItemActivityView: View {
     var vm: VBVirtualMachine
     @ObservedObject var monitor: VMActivityMonitor
+    /// Whether the virtual machine is running without a window.
+    var isInBackground = false
+    /// Whether the virtual machine is kept from going to sleep while it runs in the background.
+    var isKeptAwake = false
 
     private var status: VMActivityStatus { monitor.statuses[vm.id] ?? .poweredOff }
 
@@ -16,6 +20,13 @@ struct LibraryItemActivityView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 statusLabel
+
+                if isKeptAwake {
+                    Image(systemName: "cup.and.saucer.fill")
+                        .help("This virtual machine and the Mac are kept awake while it runs in the background.")
+                        .accessibilityLabel("Prevents sleep")
+                        .transition(.opacity)
+                }
 
                 Spacer(minLength: 0)
 
@@ -44,11 +55,12 @@ struct LibraryItemActivityView: View {
         .monospacedDigit()
         .lineLimit(1)
         .animation(.snappy, value: status)
+        .animation(.snappy, value: isKeptAwake)
     }
 
     private var statusLabel: some View {
         Label {
-            Text(status.title)
+            Text(isInBackground && status.isRunning ? "\(status.title) in Background" : status.title)
                 .foregroundStyle(.primary)
                 .fontWeight(.medium)
         } icon: {

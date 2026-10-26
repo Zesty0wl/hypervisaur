@@ -10,19 +10,32 @@ enum SavedSessionPrompts {
     /// The user's preference for closing running virtual machines.
     static var closeBehavior: VMCloseBehavior { VBSettingsContainer.current.settings.closeBehavior }
 
-    /// Introduces saving the state of a virtual machine and asks whether to save it or shut down.
+    /// Introduces saving the state of a virtual machine and asks whether to save it, keep it running in the background, or shut down.
+    /// Keeping it running is only offered when closing a window, since virtual machines can't outlive the app.
     /// The answer is remembered as the default if the user asks for it.
     /// - Parameter machines: The names of the virtual machines the answer applies to.
+    /// - Parameter eligibility: Whether the virtual machine can be saved. Saving isn't offered when it can't.
     /// - Returns: `nil` if the user cancelled.
-    static func chooseCloseAction(machines: [String], quitting: Bool, from window: NSWindow?) async -> SessionCloseChoice? {
+    static func chooseCloseAction(machines: [String], eligibility: SavedSessionEligibility = .supported, quitting: Bool, from window: NSWindow?) async -> SessionCloseChoice? {
+        let keepsAwake = VBSettingsContainer.current.settings.keepsBackgroundVirtualMachinesAwake
+
         let result: CloseChoiceSheet.Result? = await presentSheet(from: window) { finish in
-            CloseChoiceSheet(machines: machines, isQuitting: quitting, onFinish: finish)
+            CloseChoiceSheet(machines: machines, eligibility: eligibility, isQuitting: quitting, keepsAwake: keepsAwake, onFinish: finish)
         }
 
         guard let result else { return nil }
 
+        /// Whether to prevent sleep is remembered, so that it also applies when virtual machines go to the background without asking.
+        if result.choice == .keepRunning {
+            VBSettingsContainer.current.settings.keepsBackgroundVirtualMachinesAwake = result.keepsAwake
+        }
+
         if result.makeDefault {
-            VBSettingsContainer.current.settings.closeBehavior = result.choice == .saveState ? .saveState : .shutDown
+            VBSettingsContainer.current.settings.closeBehavior = switch result.choice {
+            case .saveState: .saveState
+            case .keepRunning: .keepRunning
+            case .shutDown: .shutDown
+            }
         }
 
         return result.choice

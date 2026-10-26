@@ -52,6 +52,36 @@ protocol VMEngineInstance: AnyObject {
     func stopGuestCommunication() async
 }
 
+/// What an engine does to save a virtual machine's session and restore it, for ``VMController``.
+/// See ``SavedSessionStorage`` for how the saved session is stored.
+@MainActor
+protocol VMSessionSavingInstance: VMEngineInstance {
+    /// What's known about whether the session can be saved from how the virtual machine is actually running.
+    var runtimeSaveEligibility: SavedSessionEligibility { get }
+
+    /// Pauses the virtual machine if it's running.
+    /// - Returns: `true` if the virtual machine was running, `false` if it was already paused.
+    func pauseForSaving() async throws -> Bool
+    /// Describes everything that has to be captured for the virtual machine's session. Called while the virtual machine is paused.
+    func makeSavedSessionCapturePlan(wasPausedBeforeSave: Bool) async throws -> SavedSessionCapturePlan
+    /// Writes the paused virtual machine's memory and device state to the file.
+    func saveMachineState(to url: URL) async throws
+    /// Stops the virtual machine once its session has been saved and releases it.
+    func tearDownAfterSave() async throws
+    /// Releases a virtual machine that's no longer needed, without reporting that it stopped.
+    func releaseStoppedVirtualMachine() async
+    /// Starts the virtual machine from a saved session and leaves it paused.
+    /// - Parameter onConstructed: Called once the virtual machine exists, before its state is restored.
+    func restoreSession(_ preparation: SavedSessionRestorePreparation, onConstructed: (VMRuntime) -> Void) async throws
+    /// Resumes a virtual machine whose state was restored.
+    func resumeRestoredSession() async throws
+    /// Reconnects what was disconnected for saving, when a virtual machine whose session was saved couldn't be stopped
+    /// and carries on instead.
+    func restartGuestCommunication() async
+}
+
+extension VMInstance: VMSessionSavingInstance { }
+
 extension VMInstance: VMEngineInstance {
     var isGuestAppConnectedPublisher: Published<Bool>.Publisher { $isGuestAppConnected }
 

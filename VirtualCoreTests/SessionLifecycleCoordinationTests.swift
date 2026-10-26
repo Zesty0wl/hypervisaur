@@ -92,14 +92,16 @@ private final class FakePrompts: SessionClosePrompting {
     var shutDownConfirmations = [Bool]()
 
     private(set) var chooseCount = 0
+    private(set) var chosenEligibilities = [SavedSessionEligibility]()
     private(set) var shutDownInsteadCount = 0
     private(set) var shutDownInsteadReasons = [String?]()
     private(set) var failureCount = 0
     private(set) var shutDownConfirmationCount = 0
     private(set) var waitingValues = [Bool]()
 
-    func chooseCloseAction(context: SessionCloseContext) async -> SessionCloseChoice? {
+    func chooseCloseAction(eligibility: SavedSessionEligibility, context: SessionCloseContext) async -> SessionCloseChoice? {
         chooseCount += 1
+        chosenEligibilities.append(eligibility)
         return chooseAnswer
     }
 
@@ -168,7 +170,7 @@ final class SessionCloseCoordinatorTests {
 
             let closed = await makeCloser(controller, prompts).requestClose()
 
-            #expect(closed)
+            #expect(closed == .stopped)
             #expect(controller.saveCalls == 0)
             #expect(prompts.failureCount == 0)
         }
@@ -180,7 +182,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.saveCalls == 1)
         #expect(controller.shutDownCalls == 0)
         #expect(prompts.chooseCount == 0)
@@ -194,7 +196,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(!closed)
+        #expect(closed == .cancelled)
         #expect(prompts.chooseCount == 1)
         #expect(controller.saveCalls == 0)
         #expect(controller.shutDownCalls == 0)
@@ -208,7 +210,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.saveCalls == 1)
         #expect(controller.shutDownCalls == 0)
     }
@@ -221,7 +223,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.saveCalls == 0)
         #expect(controller.shutDownCalls == 1)
     }
@@ -233,7 +235,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(prompts.chooseCount == 0)
         #expect(controller.saveCalls == 1)
     }
@@ -245,7 +247,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(prompts.chooseCount == 0)
         #expect(prompts.shutDownInsteadCount == 0)
         #expect(controller.saveCalls == 0)
@@ -259,26 +261,103 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose(context: .saveAndClose)
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.saveCalls == 1)
         #expect(controller.shutDownCalls == 0)
     }
 
     @Test func virtualMachinesThatCannotSaveAtAllGetAPlainShutdownQuestionWithoutMentioningSaving() async {
-        for behavior in [VMCloseBehavior.ask, .saveState] {
-            let controller = FakeController(name: "Linux")
-            controller.saveEligibility = SavedSessionEligibility(issues: [.unsupportedGuest])
+        let controller = FakeController(name: "Linux")
+        controller.saveEligibility = SavedSessionEligibility(issues: [.unsupportedGuest])
+        let prompts = FakePrompts()
+        prompts.closeBehavior = .saveState
+
+        let closed = await makeCloser(controller, prompts).requestClose()
+
+        #expect(closed == .stopped)
+        #expect(prompts.chooseCount == 0, "there's no choice to offer")
+        #expect(prompts.shutDownInsteadReasons.count == 1)
+        #expect(prompts.shutDownInsteadReasons.first == .some(nil), "no reason means saving must not be mentioned")
+        #expect(controller.shutDownCalls == 1)
+    }
+
+    @Test func askingEveryTimeForAVirtualMachineThatCannotSaveStillOffersTheChoice() async {
+        let controller = FakeController(name: "Linux")
+        controller.saveEligibility = SavedSessionEligibility(issues: [.unsupportedGuest])
+        let prompts = FakePrompts()
+        prompts.closeBehavior = .ask
+        prompts.chooseAnswer = .keepRunning
+
+        let closed = await makeCloser(controller, prompts).requestClose()
+
+        #expect(closed == .keptRunning)
+        #expect(prompts.chooseCount == 1, "keeping it running is a choice even when saving isn't")
+        #expect(prompts.chosenEligibilities == [controller.saveEligibility], "the choice must know that saving isn't available")
+        #expect(prompts.shutDownInsteadCount == 0)
+        #expect(controller.shutDownCalls == 0)
+    }
+
+    @Test func askingEveryTimeAndChoosingKeepRunningLeavesTheVirtualMachineAlone() async {
+        let controller = FakeController(name: "A")
+        let prompts = FakePrompts()
+        prompts.closeBehavior = .ask
+        prompts.chooseAnswer = .keepRunning
+
+        let closed = await makeCloser(controller, prompts).requestClose()
+
+        #expect(closed == .keptRunning)
+        #expect(closed.allowsClosingWindow)
+        #expect(controller.saveCalls == 0)
+        #expect(controller.shutDownCalls == 0)
+        #expect(controller.lifecycleStage == .running)
+    }
+
+    @Test func preferenceToKeepRunningNeverAsksWhetherOrNotSavingIsAvailable() async {
+        for eligibility in [SavedSessionEligibility.supported, SavedSessionEligibility(issues: [.unsupportedGuest])] {
+            let controller = FakeController(name: "A")
+            controller.saveEligibility = eligibility
             let prompts = FakePrompts()
-            prompts.closeBehavior = behavior
+            prompts.closeBehavior = .keepRunning
 
             let closed = await makeCloser(controller, prompts).requestClose()
 
-            #expect(closed)
-            #expect(prompts.chooseCount == 0, "there's no choice to offer")
-            #expect(prompts.shutDownInsteadReasons.count == 1)
-            #expect(prompts.shutDownInsteadReasons.first == .some(nil), "no reason means saving must not be mentioned")
-            #expect(controller.shutDownCalls == 1)
+            #expect(closed == .keptRunning)
+            #expect(prompts.chooseCount == 0)
+            #expect(prompts.shutDownInsteadCount == 0)
+            #expect(controller.saveCalls == 0 && controller.shutDownCalls == 0)
         }
+    }
+
+    @Test func preferenceToKeepRunningDoesNotApplyToSaveAndClose() async {
+        let controller = FakeController(name: "A")
+        let prompts = FakePrompts()
+        prompts.closeBehavior = .keepRunning
+
+        let closed = await makeCloser(controller, prompts).requestClose(context: .saveAndClose)
+
+        #expect(closed == .stopped)
+        #expect(controller.saveCalls == 1)
+    }
+
+    @Test func quittingWhileAWindowCloseKeepsTheVirtualMachineRunningStillStopsIt() async {
+        let controller = FakeController(name: "A")
+        controller.pendingOperationsGate = AsyncGate()
+        let prompts = FakePrompts()
+        prompts.closeBehavior = .keepRunning
+        let closer = makeCloser(controller, prompts)
+
+        let closingWindow = Task { await closer.requestClose() }
+        for _ in 0..<3 { await Task.yield() }
+        #expect(closer.isClosing)
+
+        let quitting = Task { await closer.requestClose(context: .quit(.saveState)) }
+        for _ in 0..<3 { await Task.yield() }
+        controller.pendingOperationsGate?.open()
+
+        #expect(await closingWindow.value == .keptRunning)
+        #expect(await quitting.value == .stopped, "the virtual machine can't keep running once the app quits")
+        #expect(controller.saveCalls == 1)
+        #expect(!closer.isClosing)
     }
 
     @Test func plainShutdownQuestionCanBeCancelled() async {
@@ -289,7 +368,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(!closed)
+        #expect(closed == .cancelled)
         #expect(controller.shutDownCalls == 0)
     }
 
@@ -318,7 +397,7 @@ final class SessionCloseCoordinatorTests {
 
         let results = [await first.value, await second.value, await third.value]
 
-        #expect(results == [true, true, true])
+        #expect(results == [.stopped, .stopped, .stopped])
         #expect(controller.saveCalls == 1, "only one save may happen")
         withExtendedLifetime(prompts) { }
     }
@@ -340,7 +419,7 @@ final class SessionCloseCoordinatorTests {
         controller.pendingOperationsGate?.open()
 
         let closed = await closing.value
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.saveCalls == 1)
         withExtendedLifetime(prompts) { }
     }
@@ -353,7 +432,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(!(closed))
+        #expect(closed == .cancelled)
         #expect(prompts.failureCount == 1)
         #expect(controller.shutDownCalls == 0, "a failed save is never silently replaced by a shutdown")
         #expect(controller.lifecycleStage == .running)
@@ -367,7 +446,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.saveCalls == 2)
         #expect(controller.shutDownCalls == 0)
     }
@@ -381,7 +460,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(!(closed), "the window stays open after the user gave up on saving, the caller closes it when the guest is down")
+        #expect(closed == .cancelled, "the window stays open after the user gave up on saving, the caller closes it when the guest is down")
         #expect(prompts.failureCount == 2, "declining the confirmation goes back to the choices")
         #expect(prompts.shutDownConfirmationCount == 2)
         #expect(controller.shutDownCalls == 1)
@@ -396,7 +475,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(prompts.shutDownInsteadCount == 1)
         #expect(controller.saveCalls == 0)
         #expect(controller.shutDownCalls == 1)
@@ -410,7 +489,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(!(closed))
+        #expect(closed == .cancelled)
         #expect(controller.shutDownCalls == 0)
         #expect(controller.lifecycleStage == .running)
     }
@@ -423,7 +502,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(!(closed), "if the shutdown can't be waited for, nothing else is done to the virtual machine")
+        #expect(closed == .cancelled, "if the shutdown can't be waited for, nothing else is done to the virtual machine")
         #expect(controller.lifecycleStage == .running)
     }
 
@@ -436,7 +515,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.retryStopCalls == 2)
         #expect(controller.saveCalls == 0, "a session that's already saved must not be saved again")
     }
@@ -449,7 +528,7 @@ final class SessionCloseCoordinatorTests {
 
         let closed = await makeCloser(controller, prompts).requestClose()
 
-        #expect(closed)
+        #expect(closed == .stopped)
         #expect(controller.saveCalls == 1)
         #expect(controller.shutDownCalls == 1, "once saving is known to be unavailable, the virtual machine is shut down instead")
         #expect(prompts.shutDownInsteadCount == 1)
@@ -664,6 +743,21 @@ final class SessionTerminationCoordinatorTests {
         #expect(!result)
         #expect(a.saveCalls == 0 && a.shutDownCalls == 0)
         #expect(hold.releases == 1)
+    }
+
+    @Test func quittingWithPreferenceToKeepRunningAsksInstead() async {
+        let hold = Hold()
+        let presenter = FakePresenter()
+        presenter.closeBehavior = .keepRunning
+        presenter.chooseAnswer = .saveState
+        let a = FakeController(name: "A")
+
+        let result = await makeCoordinator(presenter: presenter, hold: hold).prepareForTermination(participants: [participant(a).0])
+
+        #expect(result)
+        #expect(presenter.chooseCount == 1, "virtual machines can't keep running after quitting, so the user decides")
+        #expect(a.saveCalls == 1)
+        #expect(a.lifecycleStage == .notRunning)
     }
 
     @Test func quittingWithPreferenceToShutDownNeverAsksOrConfirms() async {

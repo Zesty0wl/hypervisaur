@@ -92,6 +92,11 @@ struct LibraryItemView: View {
 
     private var hasOpenSession: Bool { sessionManager.session(for: vm) != nil }
 
+    /// The session of the virtual machine while it runs without a window.
+    private var backgroundSession: VirtualMachineSessionUI? {
+        sessionManager.isRunningInBackground(vm) ? sessionManager.session(for: vm) : nil
+    }
+
     private var isDuplicating: Bool { library.duplicatingMachineIdentifiers.contains(vm.id) }
 
     /// Copying a virtual machine that's in use would copy a moving target, so it has to be saved or shut down first.
@@ -101,7 +106,7 @@ struct LibraryItemView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            ArtworkView(virtualMachine: vm)
+            ArtworkView(virtualMachine: vm, livePreview: sessionManager.session(for: vm)?.livePreview)
                 .overlay(alignment: .bottomLeading) {
                     if let savedSession = vm.savedSession {
                         SavedSessionLibraryBadge(descriptor: savedSession)
@@ -138,7 +143,12 @@ struct LibraryItemView: View {
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .disabled(isVMBooted || isDuplicating)
 
-                LibraryItemActivityView(vm: vm, monitor: library.activityMonitor)
+                LibraryItemActivityView(
+                    vm: vm,
+                    monitor: library.activityMonitor,
+                    isInBackground: sessionManager.isRunningInBackground(vm),
+                    isKeptAwake: sessionManager.isKeptAwake(vm)
+                )
             }
             .padding(.horizontal, 4)
         }
@@ -176,6 +186,21 @@ struct LibraryItemView: View {
 
     @ViewBuilder
     private var contextMenuItems: some View {
+        if let backgroundSession {
+            BackgroundSessionMenuItems(
+                session: backgroundSession,
+                controller: backgroundSession.controller,
+                keepsAwake: Binding(
+                    get: { sessionManager.isKeptAwake(vm) },
+                    set: { sessionManager.setKeepsAwake($0, for: backgroundSession) }
+                )
+            ) {
+                sessionManager.launch(vm, library: library, options: nil)
+            }
+
+            Divider()
+        }
+
         Button {
             NSWorkspace.shared.selectFile(vm.bundleURL.path, inFileViewerRootedAtPath: vm.bundleURL.deletingLastPathComponent().path)
         } label: {
@@ -287,6 +312,31 @@ struct LibraryItemView: View {
 
     private struct ArtworkView: View {
         var virtualMachine: VBVirtualMachine
+        /// What the virtual machine's display shows while it runs, which replaces its artwork.
+        var livePreview: VMLivePreview?
+
+        var body: some View {
+            Group {
+                if let livePreview {
+                    LiveArtwork(virtualMachine: virtualMachine, preview: livePreview)
+                } else {
+                    StaticArtwork(virtualMachine: virtualMachine)
+                }
+            }
+            .aspectRatio(contentMode: .fill)
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+            .aspectRatio(16/9, contentMode: .fit)
+            .highlightBorder(shape)
+            .clipShape(shape)
+        }
+
+        private var shape: some InsettableShape {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+        }
+    }
+
+    private struct StaticArtwork: View {
+        var virtualMachine: VBVirtualMachine
 
         @Environment(\.virtualBuddyShowDesktopPictureThumbnails)
         private var showDesktopPicture
@@ -294,15 +344,25 @@ struct LibraryItemView: View {
         var body: some View {
             VMArtworkView(virtualMachine: virtualMachine, alwaysUseBlurHash: !showDesktopPicture)
                 .id(virtualMachine.blurHashBackgroundContent)
-                .aspectRatio(contentMode: .fill)
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                .aspectRatio(16/9, contentMode: .fit)
-                .highlightBorder(shape)
-                .clipShape(shape)
         }
+    }
 
-        private var shape: some InsettableShape {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+    private struct LiveArtwork: View {
+        var virtualMachine: VBVirtualMachine
+        @ObservedObject var preview: VMLivePreview
+
+        var body: some View {
+            ZStack {
+                if let image = preview.image {
+                    VMLivePreviewArtworkView(image: image, systemType: virtualMachine.configuration.systemType)
+                        .id(ObjectIdentifier(image))
+                        .transition(.opacity)
+                } else {
+                    StaticArtwork(virtualMachine: virtualMachine)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.smooth(duration: 0.6), value: preview.image.map { ObjectIdentifier($0) })
         }
     }
 
@@ -335,6 +395,40 @@ struct HighlightBorderModifier<Shape: InsettableShape>: ViewModifier {
 extension View {
     func highlightBorder<Shape: InsettableShape>(_ shape: Shape, color: Color = .white, opacity: Double = 0.14) -> some View {
         modifier(HighlightBorderModifier(shape: shape, color: color, opacity: opacity))
+    }
+}
+
+/// What can be done from the library to a virtual machine that's running without a window.
+private struct BackgroundSessionMenuItems: View {
+    var session: VirtualMachineSessionUI
+    @ObservedObject var controller: VMController
+    @Binding var keepsAwake: Bool
+    var showWindow: () -> Void
+
+    var body: some View {
+        Button {
+            showWindow()
+        } label: {
+            Text("Show Window")
+        }
+
+        Toggle("Prevent Sleep", isOn: $keepsAwake)
+
+        if controller.saveEligibility.isApplicable {
+            Button {
+                Task { await session.saveAndClose() }
+            } label: {
+                Text("Save & Close")
+            }
+            .disabled(!controller.state.canSaveAndClose)
+        }
+
+        Button {
+            Task { await session.shutDown() }
+        } label: {
+            Text("Shut Down")
+        }
+        .disabled(!controller.state.isRunning)
     }
 }
 

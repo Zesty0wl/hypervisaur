@@ -39,10 +39,12 @@ struct GeneralSettingsView: View {
                             .tag(behavior)
                     }
                 }
+
+                Toggle("Prevent sleep while running in background", isOn: $settings.keepsBackgroundVirtualMachinesAwake)
             } header: {
                 Text("Closing Virtual Machines")
             } footer: {
-                Text("Save state keeps the virtual machine as it is so that it continues where you left off. This feature is only available for macOS guests.")
+                Text("Save state keeps the virtual machine as it is so that it continues where you left off. This feature is available for macOS and Windows guests. Keep running in background closes the window and leaves the virtual machine running until it shuts down; open it from the library to show its window again. Preventing sleep keeps virtual machines in the background and this Mac awake, although the Mac’s display can still turn off.")
                     .settingsFooterStyle()
             }
 

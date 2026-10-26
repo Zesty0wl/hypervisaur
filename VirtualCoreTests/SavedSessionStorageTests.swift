@@ -1,5 +1,6 @@
 import XCTest
 import Virtualization
+import AppKit
 @testable import VirtualCore
 
 /// Lets a test fail or "crash" a saved session transaction at any step.
@@ -159,6 +160,66 @@ final class SavedSessionStorageTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: storage.layout.packageURL.appending(path: manifest.resource(with: .disk)!.packagePath)), originalDisk)
         XCTAssertEqual(try readWorking("Disk.img"), originalDisk, "capturing must not modify the working disk")
         try assertNoTransientLeftovers()
+    }
+
+    func testVirtualizationSessionsKeepTheFormatEarlierVersionsCanRead() throws {
+        let storage = makeStorage()
+
+        try capture(with: storage)
+
+        let manifest = try PropertyListDecoder().decode(SavedSessionManifest.self, from: Data(contentsOf: storage.layout.manifestURL))
+        XCTAssertEqual(manifest.formatVersion, SavedSessionManifest.virtualizationFormatVersion)
+        XCTAssertEqual(manifest.stateFileName, SavedSessionLayout.stateFileName)
+        XCTAssertNotNil(manifest.runtimeDescription)
+        XCTAssertNil(manifest.qemuDescription)
+    }
+
+    func testQEMUSessionsDescribeHowQEMUWasStartedAndKeepTheirScreenshot() throws {
+        let storage = makeStorage()
+        try Data("variables".utf8).write(to: path("EFIVariables.fd"))
+
+        let description = QEMUSavedSessionDescription(
+            qemuVersion: "11.1.2",
+            machineType: "virt-11.1",
+            displayAdapter: .virtioGPU,
+            hasDriversDisk: true,
+            arguments: ["-machine", "virt", "-name", "$NAME"]
+        )
+
+        let context = try XCTUnwrap(CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+
+        let plan = SavedSessionCapturePlan(
+            resources: [
+                .init(id: "disk", role: .disk, sourceURL: path("Disk.img"), workingPath: "Disk.img"),
+                .init(id: "firmwareVariables", role: .firmwareVariables, sourceURL: path("EFIVariables.fd"), workingPath: "EFIVariables.fd")
+            ],
+            configuration: .default,
+            runtimeDescription: nil,
+            screenshotSourceURL: nil,
+            wasPausedBeforeSave: false,
+            memorySize: 1,
+            qemuDescription: description,
+            stateFileName: SavedSessionLayout.qemuStateFileName,
+            screenshotImage: context.makeImage()
+        )
+
+        let descriptor = try capture(with: storage, plan: plan)
+
+        XCTAssertEqual(descriptor.status, .ready)
+        XCTAssertNotNil(descriptor.screenshotURL.flatMap { NSImage(contentsOf: $0) }, "the display's last frame is the session's screenshot")
+
+        let manifest = try PropertyListDecoder().decode(SavedSessionManifest.self, from: Data(contentsOf: storage.layout.manifestURL))
+        XCTAssertEqual(manifest.formatVersion, SavedSessionManifest.qemuFormatVersion)
+        XCTAssertEqual(manifest.qemuDescription, description)
+        XCTAssertNil(manifest.runtimeDescription)
+
+        try writeWorking("EFIVariables.fd", "changed after saving")
+
+        let preparation = try storage.prepareRestore()
+        XCTAssertEqual(preparation.stateFileURL.lastPathComponent, SavedSessionLayout.qemuStateFileName)
+        XCTAssertEqual(try readWorking("EFIVariables.fd"), Data("variables".utf8), "the firmware's variables belong with the saved state")
     }
 
     func testCaptureClonesAreIndependentFromWorkingFiles() throws {

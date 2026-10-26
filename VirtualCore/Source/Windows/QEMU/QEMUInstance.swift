@@ -9,7 +9,9 @@ final class QEMUInstance: VMEngineInstance {
     var options = VMSessionOptions.default
 
     let virtualMachineModel: VBVirtualMachine
-    var effectiveModel: VBVirtualMachine { virtualMachineModel }
+    /// The virtual machine as it was when a session was saved, while that session runs.
+    private var restoredModel: VBVirtualMachine?
+    var effectiveModel: VBVirtualMachine { restoredModel ?? virtualMachineModel }
     let isRecoveryBoot = false
 
     /// Guests that run with QEMU don't have the guest app.
@@ -23,6 +25,8 @@ final class QEMUInstance: VMEngineInstance {
     private let onVMStop: (Error?) -> Void
     private var machine: QEMUVirtualMachine?
     private var setupCompletionTask: Task<Void, Never>?
+    /// Set while the virtual machine is released on purpose, which isn't news for whoever is told that it stopped.
+    private var isReleasing = false
 
     private let logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "QEMUInstance")
 
@@ -48,6 +52,14 @@ final class QEMUInstance: VMEngineInstance {
         let isUnattendedInstallation = devices.installDiskURL != nil && (try? model.windowsUnattendedSetup()) != nil
 
         let machine = QEMUVirtualMachine(model: model, installDiskURL: devices.installDiskURL, driversDiskURL: devices.driversDiskURL, displayAdapter: devices.displayAdapter)
+        try await start(machine)
+
+        if isUnattendedInstallation {
+            restartWhenSetupFinishes(machine)
+        }
+    }
+
+    private func start(_ machine: QEMUVirtualMachine, restoring restoration: QEMUVirtualMachine.Restoration? = nil) async throws {
         machine.onStop = { [weak self] error in
             self?.handleStop(error)
         }
@@ -57,15 +69,12 @@ final class QEMUInstance: VMEngineInstance {
         library.registerBootedVM(self)
 
         do {
-            try await machine.start()
+            try await machine.start(restoring: restoration)
         } catch {
             self.machine = nil
+            guestAgentInfoObservation = nil
             library.unregisterBootedVM(self)
             throw error
-        }
-
-        if isUnattendedInstallation {
-            restartWhenSetupFinishes(machine)
         }
     }
 
@@ -200,9 +209,129 @@ final class QEMUInstance: VMEngineInstance {
         setupCompletionTask?.cancel()
         setupCompletionTask = nil
         machine = nil
+        restoredModel = nil
         guestAgentInfoObservation = nil
         guestAgentInfo.send(nil)
         library.unregisterBootedVM(self)
+
+        guard !isReleasing else { return }
         onVMStop(error)
     }
+}
+
+// MARK: - Saved Sessions
+
+extension QEMUInstance: VMSessionSavingInstance {
+    var runtimeSaveEligibility: SavedSessionEligibility {
+        guard let machine else { return .supported }
+
+        return SavedSessionEligibility(issues: machine.isInstallerAttached ? [.windowsSetupInProgress] : [])
+    }
+
+    func pauseForSaving() async throws -> Bool {
+        let machine = try requireMachine()
+
+        switch machine.state {
+        case .running:
+            try await machine.pause()
+            return true
+        case .paused:
+            return false
+        case .starting, .stopping, .stopped:
+            throw Failure("The virtual machine can’t be saved in its current state.")
+        }
+    }
+
+    /// The disks and the UEFI variables are captured as files. The TPM's state is part of QEMU's own state, and the drivers
+    /// disk is only ever changed while Windows is shut down, so it's still the same when the session is restored.
+    func makeSavedSessionCapturePlan(wasPausedBeforeSave: Bool) async throws -> SavedSessionCapturePlan {
+        let machine = try requireMachine()
+        let model = effectiveModel
+
+        var resources = [SavedSessionCapturePlan.ResourceSource]()
+
+        for device in model.configuration.hardware.storageDevices where device.isEnabled {
+            guard case .managedImage(let image) = device.backing else {
+                throw SavedSessionError.notEligible(.externalDiskImage(device.displayName))
+            }
+
+            let url = model.diskImageURL(for: image)
+
+            resources.append(.init(id: device.id, role: .disk, sourceURL: url, workingPath: url.lastPathComponent))
+        }
+
+        let variablesURL = model.windowsEFIVariablesURL
+        resources.append(.init(id: "firmwareVariables", role: .firmwareVariables, sourceURL: variablesURL, workingPath: variablesURL.lastPathComponent))
+
+        return SavedSessionCapturePlan(
+            resources: resources,
+            configuration: model.configuration,
+            runtimeDescription: nil,
+            screenshotSourceURL: nil,
+            wasPausedBeforeSave: wasPausedBeforeSave,
+            memorySize: model.configuration.hardware.memorySize,
+            qemuDescription: try await machine.savedSessionDescription(),
+            stateFileName: SavedSessionLayout.qemuStateFileName,
+            screenshotImage: machine.latestFrame
+        )
+    }
+
+    func saveMachineState(to url: URL) async throws {
+        try await requireMachine().saveState(to: url)
+    }
+
+    /// QEMU has nothing left to do once its state has been saved, so it's told to quit.
+    func tearDownAfterSave() async throws {
+        await releaseStoppedVirtualMachine()
+    }
+
+    func releaseStoppedVirtualMachine() async {
+        guard let machine else { return }
+
+        isReleasing = true
+        defer { isReleasing = false }
+
+        await machine.forceStop()
+    }
+
+    func restoreSession(_ preparation: SavedSessionRestorePreparation, onConstructed: (VMRuntime) -> Void) async throws {
+        guard let description = preparation.manifest.qemuDescription else {
+            throw SavedSessionError.invalidManifest("The saved session wasn’t made for a Windows virtual machine.")
+        }
+
+        var model = virtualMachineModel
+        model.configuration = preparation.configuration
+
+        let driversDiskURL = description.hasDriversDisk ? model.windowsDriversDiskURL : nil
+        if let driversDiskURL, !FileManager.default.fileExists(atPath: driversDiskURL.path) {
+            throw SavedSessionError.missingResource(driversDiskURL.lastPathComponent)
+        }
+
+        let machine = QEMUVirtualMachine(model: model, installDiskURL: nil, driversDiskURL: driversDiskURL, displayAdapter: description.displayAdapter)
+
+        guard try machine.comparableArguments() == description.arguments else {
+            throw SavedSessionError.configurationChanged("Hypervisaur starts Windows virtual machines differently from when this session was saved.")
+        }
+
+        restoredModel = model
+
+        onConstructed(.qemu(machine))
+
+        do {
+            try await start(machine, restoring: QEMUVirtualMachine.Restoration(stateFileURL: preparation.stateFileURL, machineType: description.machineType))
+        } catch {
+            restoredModel = nil
+            logger.error("Restoring the saved session failed: \(error, privacy: .public)")
+            throw error
+        }
+
+        logger.log("Restored the saved state, the virtual machine is paused")
+    }
+
+    func resumeRestoredSession() async throws {
+        try await requireMachine().resume()
+    }
+
+    /// QEMU quits once its state has been saved, so there's nothing that carries on and needs reconnecting.
+    func restartGuestCommunication() async { }
 }

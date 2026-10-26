@@ -6,15 +6,41 @@ struct CloseChoiceSheet: View {
     struct Result {
         var choice: SessionCloseChoice
         var makeDefault: Bool
+        /// Whether a virtual machine that keeps running is kept from going to sleep.
+        var keepsAwake: Bool
     }
 
     /// The virtual machines this applies to. A single name when closing a window, several when quitting.
     var machines: [String]
+    /// Whether saving is available. It isn't offered when it isn't, and isn't mentioned at all when it doesn't apply.
+    var eligibility: SavedSessionEligibility
     var isQuitting: Bool
     var onFinish: (Result?) -> Void
 
-    @State private var selection = SessionCloseChoice.saveState
+    @State private var selection: SessionCloseChoice
     @State private var makeDefault = false
+    @State private var keepsAwake: Bool
+
+    init(machines: [String], eligibility: SavedSessionEligibility = .supported, isQuitting: Bool, keepsAwake: Bool = false, onFinish: @escaping (Result?) -> Void) {
+        self.machines = machines
+        self.eligibility = eligibility
+        self.isQuitting = isQuitting
+        self.onFinish = onFinish
+        self._keepsAwake = State(initialValue: keepsAwake)
+
+        /// Saving is recommended when it's available. Otherwise, the choice that leaves the virtual machine as it is comes first.
+        let initialSelection: SessionCloseChoice = if eligibility.isSupported {
+            .saveState
+        } else if !isQuitting {
+            .keepRunning
+        } else {
+            .shutDown
+        }
+        self._selection = State(initialValue: initialSelection)
+    }
+
+    /// Virtual machines can't keep running once the app has quit.
+    private var offersKeepRunning: Bool { !isQuitting }
 
     private var subtitle: String {
         if isQuitting {
@@ -28,22 +54,58 @@ struct CloseChoiceSheet: View {
     }
 
     private var confirmTitle: String {
-        selection == .saveState ? "Save State" : "Shutdown"
+        switch selection {
+        case .saveState: "Save State"
+        case .keepRunning: "Keep Running"
+        case .shutDown: "Shutdown"
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Header(subtitle: Text(subtitle))
+            Header(subtitle: Text(subtitle), introducesSaving: eligibility.isSupported)
 
             VStack(spacing: 10) {
-                ChoiceCard(
-                    symbol: "tray.and.arrow.down.fill",
-                    title: "Save State",
-                    badge: "Recommended",
-                    detail: "Pick up exactly where you left off. Unsaved work is preserved, and starting again takes a few seconds.",
-                    isSelected: selection == .saveState
-                ) {
-                    selection = .saveState
+                if eligibility.isApplicable {
+                    ChoiceCard(
+                        symbol: "tray.and.arrow.down.fill",
+                        title: "Save State",
+                        badge: eligibility.isSupported ? "Recommended" : nil,
+                        detail: eligibility.isSupported
+                            ? "Pick up exactly where you left off. Unsaved work is preserved, and starting again takes a few seconds."
+                            : eligibility.explanationForUser ?? "",
+                        isSelected: selection == .saveState
+                    ) {
+                        selection = .saveState
+                    }
+                    .disabled(!eligibility.isSupported)
+                }
+
+                if offersKeepRunning {
+                    ChoiceCard(
+                        symbol: "play.rectangle.fill",
+                        title: "Keep Running",
+                        badge: nil,
+                        detail: "Close the window and leave the virtual machine running in the background. Open it from the library to show its window again.",
+                        isSelected: selection == .keepRunning
+                    ) {
+                        selection = .keepRunning
+                    }
+
+                    if selection == .keepRunning {
+                        Toggle(isOn: $keepsAwake) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Prevent sleep")
+                                Text("Keeps the virtual machine and this Mac awake while it runs in the background. The Mac’s display can still turn off.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(.leading, 54)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
 
                 ChoiceCard(
@@ -56,6 +118,7 @@ struct CloseChoiceSheet: View {
                     selection = .shutDown
                 }
             }
+            .animation(.snappy, value: selection)
 
             Toggle(isOn: $makeDefault) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -66,10 +129,12 @@ struct CloseChoiceSheet: View {
                 }
             }
 
-            Text("A saved state stays with the virtual machine on this Mac. Shared folders and network connections aren’t preserved, and a saved state may stop working after macOS or Hypervisaur updates. To keep a particular state around, duplicate the saved virtual machine before resuming it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if eligibility.isSupported {
+                Text("A saved state stays with the virtual machine on this Mac. Shared folders and network connections aren’t preserved, and a saved state may stop working after macOS, Hypervisaur or QEMU updates. To keep a particular state around, duplicate the saved virtual machine before resuming it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Divider()
 
@@ -83,7 +148,7 @@ struct CloseChoiceSheet: View {
                 Spacer()
 
                 Button(confirmTitle) {
-                    onFinish(Result(choice: selection, makeDefault: makeDefault))
+                    onFinish(Result(choice: selection, makeDefault: makeDefault, keepsAwake: keepsAwake))
                 }
                 .keyboardShortcut(.defaultAction)
                 .airGlassButtonStyle(prominent: true)
@@ -96,10 +161,12 @@ struct CloseChoiceSheet: View {
 
     private struct Header: View {
         var subtitle: Text
+        /// Saving is only introduced when it can be chosen.
+        var introducesSaving: Bool
 
         var body: some View {
             HStack(alignment: .center, spacing: 14) {
-                Image(systemName: "tray.and.arrow.down.fill")
+                Image(systemName: introducesSaving ? "tray.and.arrow.down.fill" : "macwindow")
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.2), radius: 2)
@@ -107,7 +174,7 @@ struct CloseChoiceSheet: View {
                     .background(Color.accentColor.gradient, in: RoundedRectangle(cornerRadius: 14))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Close now. Continue later.")
+                    Text(introducesSaving ? "Close now. Continue later." : "Close the Window?")
                         .font(.title2.weight(.semibold))
 
                     subtitle
@@ -128,6 +195,8 @@ private struct ChoiceCard: View {
     var action: () -> Void
 
     @State private var isHovering = false
+
+    @Environment(\.isEnabled) private var isEnabled
 
     var tint: Color { isSelected ? .accentColor : .secondary }
 
@@ -180,6 +249,7 @@ private struct ChoiceCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.5)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { isHovering = $0 }
     }
@@ -243,6 +313,18 @@ extension SavedSessionPrompts {
 #if DEBUG
 #Preview("Close") {
     CloseChoiceSheet(machines: ["macOS 27 Hackable"], isQuitting: false) { _ in }
+}
+
+#Preview("Close Keeping It Running") {
+    CloseChoiceSheet(machines: ["Ubuntu"], eligibility: SavedSessionEligibility(issues: [.unsupportedGuest]), isQuitting: false, keepsAwake: true) { _ in }
+}
+
+#Preview("Close Without Saving") {
+    CloseChoiceSheet(machines: ["macOS 27 Hackable"], eligibility: SavedSessionEligibility(issues: [.usbDeviceAttached]), isQuitting: false) { _ in }
+}
+
+#Preview("Close Linux") {
+    CloseChoiceSheet(machines: ["Ubuntu"], eligibility: SavedSessionEligibility(issues: [.unsupportedGuest]), isQuitting: false) { _ in }
 }
 
 #Preview("Quit") {

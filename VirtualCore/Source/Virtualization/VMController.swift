@@ -217,8 +217,11 @@ public final class VMController: ObservableObject {
     /// The connection to the Hypervisaur agent in the guest, while the virtual machine runs.
     public var guestAgent: GuestAgentConnection? { instance?.guestAgentConnection }
 
-    /// The instance when the virtual machine runs with Virtualization, which is the only engine that supports saved sessions.
+    /// The instance when the virtual machine runs with Virtualization.
     private var virtualizationInstance: VMInstance? { instance as? VMInstance }
+
+    /// The instance when it runs with an engine that can save its session.
+    private var savingInstance: (any VMSessionSavingInstance)? { instance as? any VMSessionSavingInstance }
 
     private func createInstance() -> any VMEngineInstance {
         switch virtualMachineModel.configuration.systemType {
@@ -314,7 +317,7 @@ public final class VMController: ObservableObject {
             supportsCloning: bundleSupportsCloning
         )
 
-        guard let instance = virtualizationInstance, state.isRunning || state.isPaused else { return staticEligibility }
+        guard let instance = savingInstance, state.isRunning || state.isPaused else { return staticEligibility }
 
         return staticEligibility.merging(instance.runtimeSaveEligibility)
     }
@@ -502,15 +505,25 @@ public final class VMController: ObservableObject {
             throw wrapRestoreError(error)
         }
 
-        let newInstance: VMInstance
+        let newInstance: any VMSessionSavingInstance
+        let vm: VMRuntime
 
         do {
-            newInstance = createVirtualizationInstance()
+            guard let savingInstance = createInstance() as? any VMSessionSavingInstance else {
+                throw SavedSessionError.notEligible(.unsupportedGuest)
+            }
+            newInstance = savingInstance
             instance = newInstance
 
             try await newInstance.restoreSession(preparation) { [self] vm in
-                state = .restoring(.virtualization(vm), .restoringMemory)
+                state = .restoring(vm, .restoringMemory)
             }
+
+            guard let runtime = newInstance.currentRuntime?.runtime else {
+                await newInstance.releaseStoppedVirtualMachine()
+                throw Failure("The virtual machine isn’t available after restoring its state.")
+            }
+            vm = runtime
         } catch {
             /// Nothing has executed, so putting the files back keeps the saved session exactly as it was.
             instance = nil
@@ -518,8 +531,6 @@ public final class VMController: ObservableObject {
             reconcileState()
             throw wrapRestoreError(error)
         }
-
-        let vm = VMRuntime.virtualization(try newInstance.virtualMachine)
 
         state = .restoring(vm, .resuming)
 
@@ -933,11 +944,13 @@ public final class VMController: ObservableObject {
             throw SavedSessionError.operationInProgress
         }
 
-        guard let instance = virtualizationInstance else {
+        guard let instance = savingInstance else {
             throw SavedSessionError.notEligible(.unsupportedGuest)
         }
         instance.options = options
-        let vm = VMRuntime.virtualization(try instance.virtualMachine)
+        guard let vm = instance.currentRuntime?.runtime else {
+            throw Failure("The virtual machine instance is not available.")
+        }
 
         /// Eligibility includes what's known about the running configuration, which is only checked while the virtual machine is running or paused.
         if let issue = saveEligibility.primaryIssue {
@@ -960,7 +973,7 @@ public final class VMController: ObservableObject {
 
             try Task.checkCancellation()
 
-            let plan = try instance.makeSavedSessionCapturePlan(wasPausedBeforeSave: !wasRunning)
+            let plan = try await instance.makeSavedSessionCapturePlan(wasPausedBeforeSave: !wasRunning)
 
             state = .saving(vm, .cloningStorage)
             let staged = try await performOffMainActor { try storage.stageCapture(plan) }
@@ -1007,8 +1020,8 @@ public final class VMController: ObservableObject {
         unhideCursor()
     }
 
-    private func returnToConditionBeforeSave(instance: VMInstance, wasRunning: Bool) async {
-        if wasRunning, let vm = try? instance.virtualMachine, vm.state == .paused {
+    private func returnToConditionBeforeSave(instance: any VMSessionSavingInstance, wasRunning: Bool) async {
+        if wasRunning, instance.currentRuntime?.isPaused == true {
             do {
                 try await instance.resume()
             } catch {
@@ -1025,7 +1038,7 @@ public final class VMController: ObservableObject {
         try await lease.perform {
             guard case .recoveryRequired(.stopFailedAfterSave) = state else { return }
 
-            guard let instance = virtualizationInstance else { throw CocoaError(.validationMissingMandatoryProperty) }
+            guard let instance = savingInstance else { throw CocoaError(.validationMissingMandatoryProperty) }
             try await instance.tearDownAfterSave()
 
             self.instance = nil
@@ -1054,10 +1067,10 @@ public final class VMController: ObservableObject {
         virtualMachineModel.reloadSavedSession()
         library.reload(animated: false)
 
-        if let instance = virtualizationInstance, let vm = try? instance.virtualMachine, vm.state == .paused {
+        if let instance = savingInstance, let current = instance.currentRuntime, current.isPaused {
             /// The virtual machine was saved but couldn't be stopped. It's usable again now that the session is gone.
             await instance.restartGuestCommunication()
-            state = .paused(.virtualization(vm))
+            state = .paused(current.runtime)
         } else {
             state = restingState
         }
