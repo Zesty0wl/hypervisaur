@@ -34,8 +34,12 @@ final class VMStorageController: ObservableObject {
         self.report = report
     }
 
+    /// Measuring usually takes a fraction of a second, which would be too short to see that it happened when it's asked for.
+    static let minimumVisibleMeasuringDuration = Duration.milliseconds(500)
+
     /// Measures everything again, unless that's already happening.
-    func refresh() {
+    /// - Parameter isRequested: Whether the user asked for it, in which case measuring shows for long enough to be seen.
+    func refresh(isRequested: Bool = false) {
         guard let library, measuringTask == nil else { return }
 
         let inputs = library.virtualMachines.map(VMStorageAnalyzer.Input.init)
@@ -44,7 +48,12 @@ final class VMStorageController: ObservableObject {
         isMeasuring = true
 
         measuringTask = Task { [weak self] in
-            let report = await Task.detached(priority: .utility) { analyzer.analyze(inputs) }.value
+            let start = ContinuousClock.now
+            let report = await Task.detached(priority: isRequested ? .userInitiated : .utility) { analyzer.analyze(inputs) }.value
+
+            if isRequested {
+                try? await Task.sleep(until: start + Self.minimumVisibleMeasuringDuration)
+            }
 
             guard let self else { return }
             self.report = report

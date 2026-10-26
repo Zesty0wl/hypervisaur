@@ -36,11 +36,16 @@ struct StorageView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    controller.refresh()
+                    controller.refresh(isRequested: true)
                 } label: {
-                    Label("Measure Again", systemImage: "arrow.clockwise")
+                    if controller.isMeasuring {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Measure Again", systemImage: "arrow.clockwise")
+                    }
                 }
-                .help("Measure again")
+                .help(controller.isMeasuring ? "Measuring…" : "Measure again")
                 .disabled(controller.isMeasuring)
             }
         }
@@ -93,11 +98,16 @@ private struct VolumeSummaryView: View {
         let other = volume.usedCapacity - min(accounted, volume.usedCapacity)
 
         return [
-            StorageSegment(title: "Virtual machines", size: machines, color: .accentColor),
-            StorageSegment(title: "Downloads", size: downloads, color: .purple),
-            StorageSegment(title: "In the Trash", size: trash, color: .orange),
-            StorageSegment(title: "Other files", size: other, color: .secondary.opacity(0.55)),
-            StorageSegment(title: "Purgeable", size: purgeable, color: .secondary.opacity(0.25)),
+            StorageSegment(title: "Virtual machines", size: machines, color: .accentColor,
+                           explanation: "The virtual machines in the library. What copies of a virtual machine share is counted once."),
+            StorageSegment(title: "Downloads", size: downloads, color: .purple,
+                           explanation: "Installers and disc images that were downloaded to create virtual machines. They can be downloaded again."),
+            StorageSegment(title: "In the Trash", size: trash, color: .orange,
+                           explanation: "Virtual machines that were moved to the Trash. They take up space until you empty the Trash in the Finder."),
+            StorageSegment(title: "Other files", size: other, color: .secondary.opacity(0.55),
+                           explanation: "Everything else on the volume, which isn’t Hypervisaur’s."),
+            StorageSegment(title: "Purgeable", size: purgeable, color: .secondary.opacity(0.25),
+                           explanation: "Space that’s in use now, but that macOS frees by itself when it’s needed, such as caches, iCloud files that can be downloaded again, and local Time Machine snapshots."),
         ]
     }
 
@@ -106,6 +116,13 @@ private struct VolumeSummaryView: View {
             HStack(alignment: .firstTextBaseline) {
                 Label(volume.name, systemImage: "internaldrive")
                     .font(.headline)
+
+                /// The time is shown relative to now, which changes by itself.
+                TimelineView(.periodic(from: report.date, by: 15)) { context in
+                    Text(measuredDescription(at: context.date))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 Spacer()
 
@@ -120,8 +137,10 @@ private struct VolumeSummaryView: View {
             HStack(spacing: 16) {
                 ForEach(segments.filter { $0.size > 0 }) { segment in
                     StorageLegendItem(color: segment.color, title: segment.title, size: segment.size)
+                        .help(segment.explanation)
                 }
                 StorageLegendItem(color: nil, title: "Available", size: volume.availableCapacity)
+                    .help("Free space on the volume.")
             }
             .font(.caption)
 
@@ -135,11 +154,19 @@ private struct VolumeSummaryView: View {
     }
 }
 
+extension VolumeSummaryView {
+    fileprivate func measuredDescription(at now: Date) -> String {
+        guard now.timeIntervalSince(report.date) >= 60 else { return "Measured just now" }
+        return "Measured \(report.date.formatted(.relative(presentation: .named, unitsStyle: .wide)))"
+    }
+}
+
 private struct StorageSegment: Identifiable {
     var id: String { title }
     var title: String
     var size: UInt64
     var color: Color
+    var explanation: String
 }
 
 private struct SegmentedStorageBar: View {
@@ -153,7 +180,7 @@ private struct SegmentedStorageBar: View {
                     Rectangle()
                         .fill(segment.color)
                         .frame(width: max(2, proxy.size.width * fraction(of: segment.size)))
-                        .help("\(segment.title): \(segment.size.formattedBytes)")
+                        .help("\(segment.title): \(segment.size.formattedBytes). \(segment.explanation)")
                 }
                 Spacer(minLength: 0)
             }
