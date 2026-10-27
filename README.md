@@ -6,7 +6,7 @@
 
 <p align="center">Run macOS, Linux and Windows 11 virtual machines on Apple silicon Macs.</p>
 
-https://github.com/user-attachments/assets/035a9ff6-a47a-486c-ae10-5fce98ac1a42
+https://github.com/user-attachments/assets/23ddd942-8b0a-49a5-a74b-4f0ab5acbc0f
 
 <p align="center"><sub>Starting Windows 11, following its logs, opening a shell in it from Terminal, and dragging files in and out. <a href="./assets/Video/Hypervisaur.mp4">Download the video</a></sub></p>
 
