@@ -56,8 +56,10 @@ public struct LibraryView: View {
 
     public var body: some View {
         libraryContents
-            .frame(minWidth: 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
+            .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
             .toolbar(content: { toolbarContents })
+            /// The rack looks the same in light and dark mode, like hardware does, so the window around it stays dark.
+            .windowAppearance(.darkAqua)
             .task {
                 #if DEBUG
                 if UserDefaults.standard.bool(forKey: "VBOpenSettings") {
@@ -88,24 +90,24 @@ public struct LibraryView: View {
         }
     }
 
-    private var gridSpacing: CGFloat { 16 }
-    private var gridItemMinSize: CGFloat { 240 }
-    private var gridColumns: [GridItem] {
-        [.init(.adaptive(minimum: gridItemMinSize), spacing: gridSpacing)]
-    }
-    
+    private static let unitSpacing: CGFloat = 4
+    private static let rackPadding: CGFloat = 14
+
     @ViewBuilder
     private var libraryContents: some View {
         ZStack {
-            BlurHashFullBleedBackground(content: .blurHash(.virtualBuddyBackground))
+            RackPalette.caseBackground
                 .ignoresSafeArea()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .fullBleedBackgroundDimmed(![.loaded, .loading].contains(library.state.id))
+
+            /// Units slide along the rails as the rack scrolls, and the rails show wherever there's no unit.
+            RackRails(holePitch: (LibraryItemView.height + Self.unitSpacing) / 3)
+                .padding(.horizontal, Self.rackPadding)
+                .ignoresSafeArea()
 
             Group {
                 switch library.state {
                 case .loaded(let machines):
-                    grid(machines)
+                    rack(machines)
                         .task { canShowFirstLaunchExperience = false }
                 case .empty:
                     if shouldShowFirstLaunchExperienceOnEmptyLibrary {
@@ -130,24 +132,25 @@ public struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func grid(_ machines: [VBVirtualMachine]) -> some View {
+    private func rack(_ machines: [VBVirtualMachine]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
-                LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
+                LazyVStack(spacing: Self.unitSpacing) {
+                    RackHeader(machines: machines, monitor: library.activityMonitor)
+
                     ForEach(machines) { vm in
                         Button {
-                            sessionManager.launch(vm, library: library, options: nil)
+                            sessionManager.launchAndStart(vm, library: library)
                         } label: {
-                            LibraryItemView(vm: vm, name: vm.name)
+                            LibraryItemView(monitor: library.activityMonitor, vm: vm, name: vm.name)
                         }
                         .buttonStyle(.vbLibraryItem)
                         .environmentObject(library)
-                        .transition(.scale(scale: 0.3).combined(with: .opacity))
+                        .transition(.move(edge: .top).combined(with: .opacity))
                         .id(vm.id)
                     }
                 }
-                .padding()
-                .padding(.top)
+                .padding(Self.rackPadding)
             }
             /// Running virtual machines show what they're using while the library is open.
             .task { await library.activityMonitor.observe() }
