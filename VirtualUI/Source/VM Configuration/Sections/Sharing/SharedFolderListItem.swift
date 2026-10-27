@@ -10,31 +10,22 @@ import VirtualCore
 
 struct SharedFolderListItem: View {
     @Binding var folder: VBSharedFolder
+    var remove: () -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 6) {
             Toggle(folder.shortName, isOn: $folder.isEnabled)
-            label
-        }
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .controlSize(.mini)
-            .disabled(folder.errorMessage != nil)
-            .labelsHidden()
-            .padding(.vertical, 4)
-            /// Easier to hit trailing edge buttons without hovering floating scroll bar.
-            .padding(.trailing, 4)
-    }
+                .labelsHidden()
+                .disabled(folder.errorMessage != nil)
 
-    @ViewBuilder
-    private var label: some View {
-        HStack(spacing: 4) {
-            folder.icon(maxHeight: 14)
+            folder.icon(maxHeight: 16)
 
             Text(folder.shortName)
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .help(folder.url.path)
 
-            Spacer()
+            Spacer(minLength: 0)
 
             if let errorMessage = folder.errorMessage {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -47,14 +38,15 @@ struct SharedFolderListItem: View {
                     Image(systemName: folder.isReadOnly ? "pencil.slash" : "pencil")
                 }
                 .help(folder.isReadOnly ? "Make writable" : "Make read only")
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .disabled(!folder.isEnabled)
             }
+
+            CompactListRemoveButton(help: "Remove this shared folder", action: remove)
         }
-        .padding(.leading, 6)
-        .opacity(folder.isEnabled ? 1 : 0.8)
-        .opacity(folder.errorMessage != nil ? 0.3 : 1)
-        .font(.system(size: 11))
+        .opacity(folder.isEnabled ? 1 : 0.6)
+        .opacity(folder.errorMessage != nil ? 0.5 : 1)
+        .compactListRow()
     }
 }
 

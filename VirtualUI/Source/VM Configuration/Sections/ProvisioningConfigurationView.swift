@@ -41,9 +41,10 @@ struct ProvisioningConfigurationView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Toggle("Automatically create a macOS account on first boot", isOn: $configuration.provisioningEnabled)
+                Toggle("Create a macOS account on first boot", isOn: $configuration.provisioningEnabled)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Spacer()
 

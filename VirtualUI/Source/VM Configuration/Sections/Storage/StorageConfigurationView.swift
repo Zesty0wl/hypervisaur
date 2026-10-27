@@ -13,8 +13,6 @@ struct StorageConfigurationView: View {
 
     @Binding var hardware: VBMacDevice
 
-    @State private var selection = Set<VBStorageDevice.ID>()
-
     @State private var isShowingDeviceConfigurationSheet = false
     @State private var deviceBeingConfigured: VBStorageDevice?
 
@@ -81,37 +79,25 @@ struct StorageConfigurationView: View {
         }
     }
 
+    private var visibleDevices: [Binding<VBStorageDevice>] {
+        $hardware.storageDevices.filter { !shouldHide($0.wrappedValue) }
+    }
+
     private var list: some View {
-        GroupedList {
-            List(selection: $selection) {
-                ForEach($hardware.storageDevices.filter({ !shouldHide($0.wrappedValue) })) { $device in
-                    StorageDeviceListItem(device: $device) {
-                        configure(device)
-                    }
-                        .tag(device.id)
+        CompactList(isEmpty: visibleDevices.isEmpty, emptyMessage: "No additional storage devices.") {
+            ForEach(visibleDevices) { $device in
+                StorageDeviceListItem(device: $device) {
+                    configure(device)
+                } remove: {
+                    remove(device)
                 }
             }
-        } emptyOverlay: {
-            EmptyView()
-        } addButton: { label in
+        } addButton: {
             Button {
                 create()
             } label: {
-                label.groupedListButtonLabel()
+                Label("Add Storage Device…", systemImage: "plus")
             }
-            .help("Add storage device")
-        } removeButton: { label in
-            Button {
-                for deviceID in selection {
-                    guard let idx = hardware.storageDevices.firstIndex(where: { $0.id == deviceID }) else { continue }
-                    guard !hardware.storageDevices[idx].isBootVolume else { continue }
-                    hardware.storageDevices.remove(at: idx)
-                }
-            } label: {
-                label.groupedListButtonLabel()
-            }
-            .disabled(selection.isEmpty)
-            .help("Remove selected devices")
         }
         .sheet(isPresented: $isShowingDeviceConfigurationSheet) {
             let device = deviceBeingConfigured ?? .template
@@ -138,6 +124,11 @@ struct StorageConfigurationView: View {
     private func create() {
         configure(nil)
     }
+
+    private func remove(_ device: VBStorageDevice) {
+        guard !device.isBootVolume else { return }
+        hardware.storageDevices.removeAll { $0.id == device.id }
+    }
     
     private func createImageIfNeeded(for newDevice: VBStorageDevice) async throws {
         guard newDevice.usesManagedDiskImage else { return }
@@ -149,29 +140,23 @@ struct StorageConfigurationView: View {
 struct StorageDeviceListItem: View {
     @Binding var device: VBStorageDevice
     var configureDevice: () -> Void
+    var remove: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Toggle(device.displayName, isOn: $device.isEnabled)
+                .labelsHidden()
                 .disabled(device.isBootVolume)
                 .help(device.isBootVolume ? "The boot storage device can't be disabled" : "Enable/disable this storage device")
 
-            label
-        }
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .labelsHidden()
-            .padding(6)
-    }
-
-    @ViewBuilder
-    private var label: some View {
-        HStack(spacing: 6) {
             device.iconView
 
             Text(device.displayName)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .opacity(device.isEnabled ? 1 : 0.6)
 
-            Spacer()
+            Spacer(minLength: 0)
 
             Button {
                 configureDevice()
@@ -179,12 +164,22 @@ struct StorageDeviceListItem: View {
                 Image(systemName: "ellipsis.circle")
             }
             .help("Device settings")
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .disabled(device.isBootVolume && !device.canBeResized)
-        }
-        .padding(.leading, 6)
-        .opacity(device.isEnabled ? 1 : 0.8)
 
+            if !device.isBootVolume {
+                CompactListRemoveButton(help: "Remove this storage device", action: remove)
+            }
+        }
+        .compactListRow()
+        .contextMenu {
+            Button("Device Settings…", action: configureDevice)
+                .disabled(device.isBootVolume && !device.canBeResized)
+
+            if !device.isBootVolume {
+                Button("Remove", action: remove)
+            }
+        }
     }
 }
 

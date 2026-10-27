@@ -32,7 +32,7 @@ struct NetworkConfigurationView: View {
     private var bridgedNetworkingDisabled: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             NetworkDevicePicker(hardware: $hardware, bridgedNetworkingDisabled: bridgedNetworkingDisabled)
 
             if bridgedNetworkingDisabled {
@@ -53,8 +53,8 @@ struct NetworkConfigurationView: View {
     
     @ViewBuilder
     private var macAddressField: some View {
-        PropertyControl("MAC Address") {
-            EphemeralTextField($hardware.networkMACAddress, alignment: .leading) { addr in
+        PropertyControl("MAC Address", inline: true) {
+            EphemeralTextField($hardware.networkMACAddress, alignment: .trailing) { addr in
                 Text(addr)
                     .textCase(.uppercase)
             } editableContent: { value in
@@ -133,7 +133,7 @@ struct NetworkDevicePicker: View {
     @State private var interfaces: [VBNetworkDeviceInterface] = [.automatic]
 
     var body: some View {
-        PropertyControl("Interface") {
+        PropertyControl("Interface", inline: true) {
             HStack {
                 Picker("Interface", selection: $hardware.networkDeviceSelection) {
                     Text("Disabled").tag(NetworkDeviceSelection.disabled)
@@ -151,8 +151,7 @@ struct NetworkDevicePicker: View {
                     }
                 }
                 .labelsHidden()
-
-                Spacer()
+                .fixedSize()
 
                 if guestType.supportsBridgedNetworking {
                     Button {

@@ -29,9 +29,9 @@ struct PointingDeviceConfigurationView: View {
     }
     
     var body: some View {
-        PropertyControl("Device Type", spacing: 8) {
+        PropertyControl("Pointing Device", inline: true) {
             VStack(alignment: .leading) {
-                Picker("Device Type", selection: $hardware.pointingDevice.kind) {
+                Picker("Pointing Device", selection: $hardware.pointingDevice.kind) {
                     ForEach(availableKinds) { kind in
                         Text(kind.name)
                             .tag(kind)

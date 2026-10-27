@@ -64,38 +64,23 @@ struct USBDevicesConfigurationView: View {
         return feature?.status.supportMessage
     }
 
-    @State private var selectedIdentifiers = Set<VBUSBDevice.ID>()
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            GroupedList {
-                List(selection: $selectedIdentifiers) {
-                    ForEach(hardware.usbDevices) { device in
-                        USBConfiguredDeviceRow(device: device)
-                            .tag(device.id)
+        VStack(alignment: .leading, spacing: 10) {
+            CompactList(isEmpty: hardware.usbDevices.isEmpty, emptyMessage: "No USB devices.") {
+                ForEach(hardware.usbDevices) { device in
+                    USBConfiguredDeviceRow(device: device) {
+                        remove(device)
                     }
                 }
-            } headerAccessory: {
-                headerAccessory
-            } footerAccessory: {
-                EmptyView()
-            } emptyOverlay: {
-                emptyOverlay
-            } addButton: { label in
+            } addButton: {
                 Menu {
                     addDeviceMenuOptions
-                        .groupedListButtonLabel()
                 } label: {
-                    label.groupedListButtonLabel()
+                    Label("Add USB Device", systemImage: "plus")
                 }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
                 .help("Add USB device")
-            } removeButton: { label in
-                Button {
-                    removeSelectedDevices()
-                } label: {
-                    label.groupedListButtonLabel()
-                }
-                .disabled(selectedIdentifiers.isEmpty)
             }
             .disabled(isUnsupported || usbPassthroughDisabled)
             .sheet(item: $additionMode) { mode in
@@ -122,6 +107,7 @@ struct USBDevicesConfigurationView: View {
             
             Devices that have isochronous endpoints (such as iPhones) are not supported. 
             """)
+                .font(.caption)
                 .foregroundStyle(.secondary)
 
             if isUnsupported, let supportMessage {
@@ -131,21 +117,6 @@ struct USBDevicesConfigurationView: View {
         }
         .onChange(of: usbPassthroughDisabled) { _, disabled in
             if disabled { additionMode = nil }
-        }
-    }
-
-    @ViewBuilder
-    private var emptyOverlay: some View {
-        if hardware.usbDevices.isEmpty {
-            Text("No host USB devices are configured\nfor this virtual machine.")
-                .multilineTextAlignment(.center)
-
-            Menu {
-                addDeviceMenuOptions
-            } label: {
-                Text("Add…")
-            }
-            .menuIndicator(.hidden)
         }
     }
 
@@ -160,33 +131,29 @@ struct USBDevicesConfigurationView: View {
         }
     }
 
-    @ViewBuilder
-    private var headerAccessory: some View {
-        Text("USB Devices")
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private func add(_ device: VBUSBDevice) {
         guard !usbPassthroughDisabled else { return }
         guard !hardware.usbDevices.contains(where: { $0.id == device.id }) else { return }
         hardware.usbDevices.append(device)
     }
 
-    private func removeSelectedDevices() {
-        hardware.usbDevices.removeAll {
-            selectedIdentifiers.contains($0.id)
-        }
-        selectedIdentifiers.removeAll()
+    private func remove(_ device: VBUSBDevice) {
+        hardware.usbDevices.removeAll { $0.id == device.id }
     }
 }
 
 private struct USBConfiguredDeviceRow: View {
     let device: VBUSBDevice
+    var remove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+            Image(systemName: "cable.connector")
+                .foregroundStyle(.secondary)
+
             if let name = device.name {
                 Text(name)
+                    .lineLimit(1)
             } else {
                 Text("USB Device")
             }
@@ -194,10 +161,14 @@ private struct USBConfiguredDeviceRow: View {
             Text(verbatim: String(formattedUSBVendorID: device.vendorID, productID: device.productID))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            Spacer(minLength: 0)
+
+            CompactListRemoveButton(help: "Remove this USB device", action: remove)
         }
+        .compactListRow()
         .contentShape(.rect)
-        .padding(.vertical, 6)
-        .monospacedDigit()
         .usbDeviceContextMenu(vendorID: device.vendorID, productID: device.productID)
     }
 }

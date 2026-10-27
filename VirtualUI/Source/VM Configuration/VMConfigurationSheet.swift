@@ -12,8 +12,8 @@ public struct VMConfigurationSheet: View {
 
     public static let minWidth: CGFloat = 760
     static let minHeight: CGFloat = 500
-    /// Wide rather than tall, so that it suits a Mac's screen without scrolling.
-    static let idealSize = CGSize(width: 880, height: 580)
+    /// Wide enough for two columns of settings, and tall enough to show most of them without scrolling.
+    static let idealSize = CGSize(width: 900, height: 720)
 
     @EnvironmentObject private var viewModel: VMConfigurationViewModel
 

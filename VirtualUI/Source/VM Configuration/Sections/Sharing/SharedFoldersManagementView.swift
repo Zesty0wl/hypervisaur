@@ -32,7 +32,6 @@ struct SharedFoldersManagementView: View {
     
     @State private var isShowingError = false
     @State private var errorMessage = "Error"
-    @State private var selection = Set<VBSharedFolder.ID>()
     @State private var selectionBeingRemoved: Set<VBSharedFolder.ID>?
     @State private var isShowingRemovalConfirmation = false
     @State private var isShowingHelpPopover = false
@@ -65,40 +64,39 @@ struct SharedFoldersManagementView: View {
 
     @ViewBuilder
     private var sharedFoldersList: some View {
-        GroupedList {
-            List(selection: $selection) {
-                ForEach($configuration.sharedFolders) { $folder in
-                    SharedFolderListItem(folder: $folder)
-                        .contextMenu { folderMenu(for: $folder) }
-                        .tag(folder.id)
+        CompactList(isEmpty: configuration.sharedFolders.isEmpty, emptyMessage: "No shared folders.") {
+            ForEach($configuration.sharedFolders) { $folder in
+                SharedFolderListItem(folder: $folder) {
+                    confirmRemoval(for: [folder.id])
+                }
+                .contextMenu { folderMenu(for: $folder) }
+            }
+        } addButton: {
+            HStack {
+                Button {
+                    addFolder()
+                } label: {
+                    Label("Add Shared Folder…", systemImage: "plus")
+                }
+
+                if showTip {
+                    Button {
+                        isShowingHelpPopover.toggle()
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                    }
+                    .transition(.opacity)
+                    .popover(isPresented: $isShowingHelpPopover) {
+                        mountTip
+                    }
+                    .help("Shared folders help")
                 }
             }
-        } headerAccessory: {
-            headerAccessory
-        } footerAccessory: {
-            EmptyView()
-        } emptyOverlay: {
-            emptyOverlay
-        } addButton: { label in
-            Button {
-                addFolder()
-            } label: {
-                label.groupedListButtonLabel()
-            }
-            .help("Add shared folder")
-        } removeButton: { label in
-            Button {
-                confirmRemoval()
-            } label: {
-                label.groupedListButtonLabel()
-            }
-            .help("Remove selection from shared folders")
-            .disabled(selection.isEmpty)
         }
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             Group {
                 if let fileSharingHelp {
                     sharedFoldersList
@@ -208,40 +206,7 @@ struct SharedFoldersManagementView: View {
         }
     }
     
-    @ViewBuilder
-    private var emptyOverlay: some View {
-        if configuration.sharedFolders.isEmpty {
-            Text("This VM has no shared folders.")
-            Button("Add Shared Folder") {
-                addFolder()
-            }
-            .buttonStyle(.link)
-        }
-    }
-
     @State private var showTip = false
-    
-    @ViewBuilder
-    private var headerAccessory: some View {
-        HStack {
-            Text("Shared Folders")
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if showTip {
-                Button {
-                    isShowingHelpPopover.toggle()
-                } label: {
-                    Image(systemName: "questionmark.circle.fill")
-                }
-                .buttonStyle(.borderless)
-                .transition(.opacity)
-                .popover(isPresented: $isShowingHelpPopover) {
-                    mountTip
-                }
-                .help("Shared folders help")
-            }
-        }
-    }
     
     @ViewBuilder
     private var mountTip: some View {
@@ -369,11 +334,9 @@ struct SharedFoldersManagementView: View {
         }
     }
 
-    private func confirmRemoval(for folders: Set<VBSharedFolder.ID>? = nil) {
-        let targetFolders = folders ?? selection
-
-        guard !targetFolders.isEmpty else { return }
-        selectionBeingRemoved = targetFolders
+    private func confirmRemoval(for folders: Set<VBSharedFolder.ID>) {
+        guard !folders.isEmpty else { return }
+        selectionBeingRemoved = folders
         isShowingRemovalConfirmation = true
     }
 

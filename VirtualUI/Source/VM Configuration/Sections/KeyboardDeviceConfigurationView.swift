@@ -29,9 +29,9 @@ struct KeyboardDeviceConfigurationView: View {
     }
 
     var body: some View {
-        PropertyControl("Device Type", spacing: 8) {
+        PropertyControl("Keyboard", inline: true) {
             VStack(alignment: .leading) {
-                Picker("Device Type", selection: $hardware.keyboardDevice.kind) {
+                Picker("Keyboard", selection: $hardware.keyboardDevice.kind) {
                     ForEach(availableKinds) { kind in
                         Text(kind.name)
                             .tag(kind)

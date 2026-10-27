@@ -11,18 +11,29 @@ struct PropertyControl<Content: View>: View {
     
     var label: String
     var spacing: CGFloat
+    /// Whether the label is beside the control rather than above it, which suits a single control such as a picker.
+    var inline: Bool
     var content: () -> Content
     
-    init(_ label: String, spacing: CGFloat = 4, @ViewBuilder content: @escaping () -> Content) {
+    init(_ label: String, spacing: CGFloat = 4, inline: Bool = false, @ViewBuilder content: @escaping () -> Content) {
         self.label = label
         self.spacing = spacing
+        self.inline = inline
         self.content = content
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: spacing) {
-            PropertyControlLabel(label)
-            content().labelsHidden()
+        if inline {
+            HStack(spacing: 8) {
+                PropertyControlLabel(label)
+                Spacer(minLength: 0)
+                content().labelsHidden()
+            }
+        } else {
+            VStack(alignment: .leading, spacing: spacing) {
+                PropertyControlLabel(label)
+                content().labelsHidden()
+            }
         }
     }
     

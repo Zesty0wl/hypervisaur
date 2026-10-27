@@ -64,23 +64,35 @@ extension ResolvedFeatureStatus {
     }
 }
 
-/// A page of the configuration, listed in its sidebar.
-enum VMConfigurationPage: String, Identifiable, CaseIterable {
+/// A section of the configuration.
+enum VMConfigurationSection: String, Identifiable, CaseIterable {
     case bootDisk
     case general
-    case storage
     case display
+    case inputAndSound
     case network
+    case storage
     case sharing
     case guestApp
     case usbDevices
     case provisioning
 
     var id: RawValue { rawValue }
+
+    /// The boot disk, which is only set up in the installer, is as wide as the page, and the other sections sit side by side.
+    var isFullWidth: Bool { self == .bootDisk }
+
+    /// The column that the section is in, chosen so that the columns are about as tall as each other.
+    var isInRightColumn: Bool {
+        switch self {
+        case .bootDisk, .general, .inputAndSound, .storage, .guestApp: false
+        case .display, .network, .sharing, .usbDevices, .provisioning: true
+        }
+    }
 }
 
-/// Configures a virtual machine with a sidebar of pages, each with a summary of its settings, beside the selected page,
-/// so that the whole configuration fits on a screen without scrolling.
+/// Configures a virtual machine on a single page, with its sections side by side in two columns, each only as tall as its
+/// settings, so that most of the configuration can be seen at once.
 struct VMConfigurationView: View {
     @EnvironmentObject private var viewModel: VMConfigurationViewModel
 
@@ -88,18 +100,15 @@ struct VMConfigurationView: View {
 
     static var labelSpacing: CGFloat { 2 }
 
-    static let sidebarWidth: CGFloat = 230
-
-    @AppStorage("config.selectedPage")
-    private var storedSelection = VMConfigurationPage.general
+    static let sectionSpacing: CGFloat = 20
 
     private var systemType: VBGuestType { viewModel.config.systemType }
 
-    private var pages: [VMConfigurationPage] {
-        VMConfigurationPage.allCases.filter { page in
-            switch page {
+    private var sections: [VMConfigurationSection] {
+        VMConfigurationSection.allCases.filter { section in
+            switch section {
             case .bootDisk: viewModel.context == .preInstall
-            case .general, .storage, .network: true
+            case .general, .inputAndSound, .storage, .network: true
             case .display: systemType.supportsDisplayConfiguration
             case .sharing: systemType.supportsSharedFolders || systemType.supportsClipboardSharing
             case .guestApp: systemType.supportsGuestApp
@@ -109,74 +118,140 @@ struct VMConfigurationView: View {
         }
     }
 
-    /// The page that was last looked at, or the first one when that page isn't available for this virtual machine.
-    private var selection: Binding<VMConfigurationPage?> {
-        Binding {
-            pages.contains(storedSelection) ? storedSelection : pages.first
-        } set: { newValue in
-            if let newValue { storedSelection = newValue }
+    /// Sections that sit side by side, or one that's as wide as the page.
+    private enum Row: Identifiable {
+        case columns(left: [VMConfigurationSection], right: [VMConfigurationSection])
+        case fullWidth(VMConfigurationSection)
+
+        var id: String {
+            switch self {
+            case .columns(let left, let right): (left + right).map(\.rawValue).joined(separator: "+")
+            case .fullWidth(let section): section.rawValue
+            }
         }
     }
 
-    var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: Self.sidebarWidth)
+    private var rows: [Row] {
+        var rows = [Row]()
+        var sideBySide = [VMConfigurationSection]()
 
-            Divider()
+        func addSideBySide() {
+            defer { sideBySide.removeAll() }
 
-            if let page = selection.wrappedValue {
-                detail(for: page)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .id(page)
+            /// Sections that would be on their own in one column have the whole width rather than leaving half of the page empty.
+            guard sideBySide.contains(where: \.isInRightColumn), sideBySide.contains(where: { !$0.isInRightColumn }) else {
+                rows.append(contentsOf: sideBySide.map { .fullWidth($0) })
+                return
+            }
+
+            rows.append(.columns(
+                left: sideBySide.filter { !$0.isInRightColumn },
+                right: sideBySide.filter(\.isInRightColumn)
+            ))
+        }
+
+        for section in sections {
+            if section.isFullWidth {
+                addSideBySide()
+                rows.append(.fullWidth(section))
+            } else {
+                sideBySide.append(section)
             }
         }
+        addSideBySide()
+
+        return rows
+    }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: Self.sectionSpacing) {
+                if viewModel.isLockedBySavedSession {
+                    savedSessionNotice
+                }
+
+                ForEach(rows) { row in
+                    switch row {
+                    case .columns(let left, let right):
+                        HStack(alignment: .top, spacing: Self.sectionSpacing) {
+                            column(left)
+                            column(right)
+                        }
+                    case .fullWidth(let section):
+                        self.section(section)
+                    }
+                }
+            }
+            .font(.system(size: 12))
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollBounceBehavior(.basedOnSize)
         .environment(\.configurationGuestType, viewModel.config.systemType)
         .environment(\.resolvedRestoreImage, viewModel.resolvedRestoreImage)
     }
 
-    // MARK: Sidebar
+    private func column(_ sections: [VMConfigurationSection]) -> some View {
+        VStack(alignment: .leading, spacing: Self.sectionSpacing) {
+            ForEach(sections) { section($0) }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
 
-    private var sidebar: some View {
-        List(selection: selection) {
-            ForEach(pages) { page in
-                Label {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title(of: page))
+    // MARK: Sections
 
-                        if let summary = summary(of: page) {
-                            Text(summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .lineLimit(1)
-                        }
-                    }
-                } icon: {
-                    icon(of: page)
-                }
-                .padding(.vertical, 3)
-                .tag(page)
-                .contextMenu {
-                    if page == .general {
-                        Button("Reset General Settings") {
-                            viewModel.config.hardware.cpuCount = initialConfiguration.hardware.cpuCount
-                            viewModel.config.hardware.memorySize = initialConfiguration.hardware.memorySize
-                        }
-                    }
+    /// A section's settings, set apart from the page around them, with its title above.
+    private func section(_ section: VMConfigurationSection) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header(of: section)
+
+            VStack(alignment: .leading, spacing: 6) {
+                content(of: section)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .controlGroup()
+            .disabled(viewModel.isLockedBySavedSession)
+        }
+    }
+
+    private func header(of section: VMConfigurationSection) -> some View {
+        HStack(spacing: 6) {
+            icon(of: section)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            Text(title(of: section))
+                .font(.headline)
+
+            Spacer(minLength: 0)
+
+            if section == .display {
+                displayConfiguration.presetPicker
+                    .disabled(viewModel.isLockedBySavedSession)
+            }
+        }
+        .padding(.horizontal, 2)
+        .contextMenu {
+            if section == .general {
+                Button("Reset Processors and Memory") {
+                    viewModel.config.hardware.cpuCount = initialConfiguration.hardware.cpuCount
+                    viewModel.config.hardware.memorySize = initialConfiguration.hardware.memorySize
                 }
             }
         }
-        .listStyle(.sidebar)
     }
 
-    private func title(of page: VMConfigurationPage) -> String {
-        switch page {
+    private var hasInputDevices: Bool { systemType.supportsVirtualTrackpad || systemType.supportsKeyboardCustomization }
+
+    private func title(of section: VMConfigurationSection) -> String {
+        switch section {
         case .bootDisk: "Boot Disk"
-        case .general: "General"
-        case .storage: viewModel.context == .preInstall ? "Additional Storage" : "Storage"
+        case .general: "Processors and Memory"
         case .display: "Display"
+        case .inputAndSound: hasInputDevices ? "Input and Sound" : "Sound"
         case .network: "Network"
+        case .storage: viewModel.context == .preInstall ? "Additional Storage" : "Storage"
         case .sharing: "Sharing"
         case .guestApp: "Guest App"
         case .usbDevices: "USB Devices"
@@ -184,158 +259,80 @@ struct VMConfigurationView: View {
         }
     }
 
-    private func summary(of page: VMConfigurationPage) -> String? {
-        let config = viewModel.config
-
-        switch page {
-        case .bootDisk: return nil
-        case .general: return config.generalSummary
-        case .storage:
-            if viewModel.context == .preInstall {
-                return config.hardware.storageDevices.count == 1 ? "None" : config.storageSummary
-            }
-            return config.storageSummary
-        case .display: return config.displaySummary
-        case .network: return config.networkSummary
-        case .sharing: return config.sharingSummary
-        case .guestApp: return config.guestAppSummary(for: viewModel.resolvedRestoreImage?.version)
-        case .usbDevices: return config.usbDevicesSummary
-        case .provisioning: return config.provisioningSummary
-        }
-    }
-
     @ViewBuilder
-    private func icon(of page: VMConfigurationPage) -> some View {
-        switch page {
+    private func icon(of section: VMConfigurationSection) -> some View {
+        switch section {
         case .bootDisk: Image(systemName: "internaldrive")
         case .general: Image(systemName: "memorychip")
-        case .storage: Image(systemName: "externaldrive")
         case .display: Image(systemName: "display")
+        case .inputAndSound: Image(systemName: hasInputDevices ? "keyboard" : "speaker.wave.2")
         case .network: Image(systemName: "network")
+        case .storage: Image(systemName: "externaldrive")
         case .sharing: Image(systemName: "folder")
         case .guestApp:
             Image(.guestSymbol)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 15)
+                .frame(width: 13)
         case .usbDevices: Image(systemName: "cable.connector")
         case .provisioning: Image(systemName: "person.crop.circle")
         }
     }
 
-    // MARK: Detail
-
-    private func detail(for page: VMConfigurationPage) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                icon(of: page)
-                    .font(.system(size: 20))
-                    .frame(width: 28)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title(of: page))
-                        .font(.title2.weight(.semibold))
-
-                    if let summary = summary(of: page) {
-                        Text(summary)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                }
-
-                Spacer()
-
-                if page == .display {
-                    displayConfiguration.presetPicker
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
-
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 16) {
-                    if viewModel.isLockedBySavedSession {
-                        savedSessionNotice
-                    }
-
-                    content(of: page)
-                        .disabled(viewModel.isLockedBySavedSession)
-                }
-                .font(.system(size: 12))
-                .padding(.horizontal, 24)
-                .padding(.bottom, 24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .scrollBounceBehavior(.basedOnSize)
-        }
-    }
-
     @ViewBuilder
-    private func content(of page: VMConfigurationPage) -> some View {
-        switch page {
+    private func content(of section: VMConfigurationSection) -> some View {
+        switch section {
         case .bootDisk:
-            group {
-                if let image = (try? viewModel.vm.bootDevice)?.managedImage {
-                    ManagedDiskImageEditor(image: image, isExistingDiskImage: false, isForBootVolume: true) { image in
-                        viewModel.updateBootStorageDevice(with: image)
-                    }
-                } else {
-                    Text("Something went terribly wrong: VM doesn't have a boot storage device with a managed disk image.")
-                        .foregroundColor(.red)
+            if let image = (try? viewModel.vm.bootDevice)?.managedImage {
+                ManagedDiskImageEditor(image: image, isExistingDiskImage: false, isForBootVolume: true) { image in
+                    viewModel.updateBootStorageDevice(with: image)
                 }
+            } else {
+                Text("Something went terribly wrong: VM doesn't have a boot storage device with a managed disk image.")
+                    .foregroundColor(.red)
             }
         case .general:
-            general
-        case .storage:
-            group {
-                StorageConfigurationView(hardware: $viewModel.config.hardware)
-                    .environmentObject(viewModel)
-            }
+            HardwareConfigurationView(device: $viewModel.config.hardware)
         case .display:
-            group { displayConfiguration }
+            displayConfiguration
+        case .inputAndSound:
+            inputAndSound
         case .network:
-            group { NetworkConfigurationView(hardware: $viewModel.config.hardware) }
+            NetworkConfigurationView(hardware: $viewModel.config.hardware)
+        case .storage:
+            StorageConfigurationView(hardware: $viewModel.config.hardware)
+                .environmentObject(viewModel)
         case .sharing:
-            group { SharingConfigurationView(configuration: $viewModel.config) }
+            SharingConfigurationView(configuration: $viewModel.config)
         case .guestApp:
-            group { GuestAppConfigurationView(configuration: $viewModel.config) }
+            GuestAppConfigurationView(configuration: $viewModel.config)
         case .usbDevices:
-            group { USBDevicesConfigurationView(hardware: $viewModel.config.hardware) }
+            USBDevicesConfigurationView(hardware: $viewModel.config.hardware)
         case .provisioning:
-            group {
-                ProvisioningConfigurationView(
-                    configuration: $viewModel.config,
-                    contextForbidden: viewModel.context != .preInstall && viewModel.vm.hasBootedNonRecoveryAtLeastOnce
-                )
-            }
+            ProvisioningConfigurationView(
+                configuration: $viewModel.config,
+                contextForbidden: viewModel.context != .preInstall && viewModel.vm.hasBootedNonRecoveryAtLeastOnce
+            )
         }
     }
 
-    /// The hardware that has few settings of its own, together on one page.
+    /// The hardware that has few settings of its own, together in one section.
     @ViewBuilder
-    private var general: some View {
-        group("Processors and Memory") {
-            HardwareConfigurationView(device: $viewModel.config.hardware)
+    private var inputAndSound: some View {
+        if systemType.supportsVirtualTrackpad {
+            PointingDeviceConfigurationView(hardware: $viewModel.config.hardware)
         }
 
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 16, alignment: .top), GridItem(.flexible(), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
-            if systemType.supportsVirtualTrackpad {
-                group("Pointing Device") {
-                    PointingDeviceConfigurationView(hardware: $viewModel.config.hardware)
-                }
-            }
-
-            if systemType.supportsKeyboardCustomization {
-                group("Keyboard") {
-                    KeyboardDeviceConfigurationView(hardware: $viewModel.config.hardware)
-                }
-            }
-
-            group("Sound") {
-                SoundConfigurationView(hardware: $viewModel.config.hardware)
-            }
+        if systemType.supportsKeyboardCustomization {
+            KeyboardDeviceConfigurationView(hardware: $viewModel.config.hardware)
         }
+
+        if hasInputDevices {
+            Divider()
+                .padding(.vertical, 4)
+        }
+
+        SoundConfigurationView(hardware: $viewModel.config.hardware)
     }
 
     private var displayConfiguration: DisplayConfigurationView {
@@ -345,23 +342,6 @@ struct VMConfigurationView: View {
             canChangePPI: systemType.supportsDisplayPPI,
             canReconfigureAutomatically: systemType.supportsAutomaticDisplayConfiguration
         )
-    }
-
-    /// Settings that belong together, set apart from the page around them, with an optional title above.
-    private func group<Content: View>(_ title: String? = nil, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let title {
-                Text(title)
-                    .font(.headline)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                content()
-            }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .controlGroup()
-        }
     }
 
     @ViewBuilder
@@ -442,3 +422,5 @@ struct VMConfigurationView_Previews: PreviewProvider {
     }
 }
 #endif
+
+
