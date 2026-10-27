@@ -105,12 +105,46 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
         }
     }
 
-    /// Starts or resumes the virtual machine full screen, in a space of its own on the screen, or takes it full screen when
-    /// it's already running. It keeps the resolution it has.
-    public func launchInFullScreen(_ vm: VBVirtualMachine, library: VMLibraryController, on screen: NSScreen) {
+    /// Starts or resumes the virtual machine without opening its window, as though its window had been closed while it ran.
+    /// Opening it from the library shows its window, and so does anything going wrong while it starts, so that it isn't missed.
+    /// A virtual machine that's already open is left as it is.
+    public func launchInBackground(_ vm: VBVirtualMachine, library: VMLibraryController) {
+        guard session(for: vm) == nil else { return }
+
+        /// A virtual machine that's missing or not installed yet is handled the way opening it would.
+        guard FileManager.default.fileExists(atPath: vm.bundleURL.path(percentEncoded: false)), !vm.needsInstall else {
+            launch(vm, library: library, options: nil)
+            return
+        }
+
+        let session = makeSession(for: vm, library: library, options: nil)
+
+        logger.info("Starting \(vm.name, privacy: .public) in the background")
+
+        moveToBackground(session, library: library)
+
+        Task { [weak self, weak library] in
+            await session.startOrResume()
+
+            /// Starting can end without the virtual machine running, such as when resuming a saved session is cancelled.
+            /// Its state may not have changed, so it's looked at once more, to let go of a session that has nothing to run.
+            guard let self, let library, self.backgroundSessionIDs.contains(vm.id), !session.needsStoppingBeforeClose else { return }
+            self.backgroundSessionStateDidChange(session, library: library)
+        }
+    }
+
+    /// Opens the virtual machine's window and starts or resumes it, or brings its window forward when it's already running.
+    public func launchAndStart(_ vm: VBVirtualMachine, library: VMLibraryController) {
+        /// Asking a running virtual machine to start would ask for it to be shut down first, so it's only shown.
         let isRunning = session(for: vm).map { !$0.controller.canStart } ?? false
 
         launch(vm, library: library, options: isRunning ? nil : VMSessionOptions(autoBoot: true))
+    }
+
+    /// Starts or resumes the virtual machine full screen, in a space of its own on the screen, or takes it full screen when
+    /// it's already running. It keeps the resolution it has.
+    public func launchInFullScreen(_ vm: VBVirtualMachine, library: VMLibraryController, on screen: NSScreen) {
+        launchAndStart(vm, library: library)
 
         session(for: vm)?.enterFullScreen(on: screen)
     }
@@ -142,6 +176,12 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
     }
 
     private func launchNewSession(for vm: VBVirtualMachine, library: VMLibraryController, options: VMSessionOptions?) {
+        let session = makeSession(for: vm, library: library, options: options)
+
+        openWindow(for: session, library: library)
+    }
+
+    private func makeSession(for vm: VBVirtualMachine, library: VMLibraryController, options: VMSessionOptions?) -> VirtualMachineSessionUI {
         let session = createSession(for: vm, library: library, options: options)
 
         session.controller.macAddressConflictHandler = { [weak self] conflicts in
@@ -149,7 +189,7 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
             return await self.presentMACAddressConflictAlert(conflicts: conflicts)
         }
 
-        openWindow(for: session, library: library)
+        return session
     }
 
     /// Opens the window of a new session, or of one whose virtual machine has been running in the background.
@@ -190,11 +230,20 @@ public final class VirtualMachineSessionUIManager: ObservableObject {
 
         logger.info("\(session.virtualMachine.name, privacy: .public) is running in the background")
 
+        moveToBackground(session, library: library)
+    }
+
+    /// Keeps a session without a window until its virtual machine stops, showing its window if something goes wrong.
+    private func moveToBackground(_ session: VirtualMachineSessionUI, library: VMLibraryController) {
+        let vmID = session.virtualMachine.id
+
         backgroundSessionIDs.insert(vmID)
         setKeepsAwake(VBSettings.current.keepsBackgroundVirtualMachinesAwake, for: session)
 
-        /// The state is published before it changes, so it's looked at once the change has been made.
+        /// The state is published before it changes, so it's looked at once the change has been made. The state it has now
+        /// is left out: a virtual machine that's about to start hasn't yet, and one whose window closed is still running.
         backgroundStateObservers[vmID] = session.controller.$state
+            .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak session, weak library] _ in
                 MainActor.assumeIsolated {
