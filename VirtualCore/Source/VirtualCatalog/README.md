@@ -29,50 +29,30 @@ The indexes are tried in order, so a release can still be found after it moves t
 
 Channels with betas or other test builds have `"prerelease" : true`, which lists them after releases.
 
-## Adding New Versions of macOS
+## New Versions of macOS
 
-To add a new version of macOS to the catalog, use `vctool`, which is included as part of VirtualBuddy.
+New versions of macOS don't need adding to the catalog. Each time the list of versions is shown, or reloaded with its Check for New Versions button, the app adds the ones that the catalog doesn't have yet:
 
-If you have installed VirtualBuddy in `/Applications`, then `vctool` will be available at `/Applications/VirtualBuddy.app/Contents/MacOS/vctool`.
+- [AppleDB](https://appledb.dev) lists every build of macOS, including betas and release candidates, along with whether Apple still signs it for virtual machines. Builds that Apple doesn't sign can't be installed, so they're left out. The list is about 5 MB, and it's only downloaded again once it's changed.
+- Apple's own list, which Virtualization reads, only has the newest release, but has it as soon as it's out.
 
-You may symlink `vctool` to a directory in your `PATH` or just add the corresponding `VirtualBuddy.app/Contents/MacOS` directory to your `PATH` to make running the tool more convenient.
+Restore images are only downloaded from Apple's servers, whatever the list says.
 
-You will also need to clone the VirtualBuddy repository itself so that you can open a pull request with the updated catalog after running `vctool`.
+A new build is shown with the requirements of the newest image of the same version of macOS in the catalog, or of the same major version, because they're decided by how Hypervisaur installs each version rather than by the restore image. The version of the MobileDevice framework that it needs is read from its build manifest, which the app downloads from the restore image without downloading the rest of it, and keeps in its caches. When a release candidate turns out to be the release, it's listed as the release.
 
-To add a new release to the catalog, use the `vctool catalog image add` command:
+The restore images in `ipsws_v2.json` are the ones that the app shows without a connection to AppleDB. They can still be added with `vctool catalog image add`, but they don't need to be.
 
-```bash
-USAGE: vctool catalog image add --ipsw <ipsw> --channel <channel> --name <name> --output <output> [--force]
+## New Major Versions of macOS
 
-OPTIONS:
-  -i, --ipsw <ipsw>       URL to the IPSW file.
-  -c, --channel <channel> ID of the release channel (devbeta or regular).
-  -n, --name <name>       User-facing name for the release (ex: "macOS 15.0 Developer Beta 4").
-  -o, --output <output>   Path to the software catalog JSON file that will be updated.
-  -f, --force             Replace existing build if it already exists in the catalog.
-  -h, --help              Show help information.
+A new major version of macOS is listed as soon as its first beta is out, in a release group of its own that has the artwork of the newest group. Its own artwork goes in `data/images`, which is built into the app, along with a group in `ipsws_v2.json` that has the same major version:
+
+```json
+{
+  "id" : "goldengate",
+  "name" : "macOS Golden Gate",
+  "majorVersion" : "27.0.0",
+  ...
+}
 ```
 
-Assuming you have cloned the repository in `~/Developer/VirtualBuddy`, here's an example of how you could add a new image to the catalog:
-
-```bash
-vctool catalog image add \
-    -i 'https://updates.cdn-apple.com/2025SpringFCS/fullrestores/082-44534/CE6C1054-99A3-4F67-A823-3EE9E6510CDE/UniversalMac_15.5_24F74_Restore.ipsw' \
-    -c regular \
-    -n 'macOS 15.5' \
-    -o ~/Developer/VirtualBuddy/data/ipsws_v2.json
-``` 
-
-If successful, the `ipsws_v2.json` file in your clone of the repository will have the new macOS release added to it.
-
-Once the change is on the `main` branch, the new release appears in the app the next time it loads the catalog.
-
-## Updating Existing Versions
-
-If an OS build that's already in the catalog needs to be updated, just use the same command but add the `--force` flag so that it doesn't complain about the version already being in the catalog. Any changes made to the title, channel, or other properties will be updated.
-
-## ⚠️ Important Note About New Major Versions
-
-Adding new major OS versions (ex: macOS ~16~26) requires additional work because a corresponding release group has to be added, and that requires the availability of image assets that follow a certain specification used by the app.
-
-The images go in `data/images`, which is built into the app, so a new release group needs a new version of the app to show its artwork.
+The images follow the specification of the other groups' images, and the app shows them from its next version.

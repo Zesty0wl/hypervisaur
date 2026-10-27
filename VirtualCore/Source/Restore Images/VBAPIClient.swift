@@ -109,6 +109,15 @@ public final class VBAPIClient {
         }
         #endif
 
+        let catalog = try await fetchCatalog(for: guest, skipCache: skipCache)
+
+        /// The catalog has the versions of macOS up to when it was last updated, and newer ones are added as soon as Apple releases them.
+        guard guest == .mac else { return catalog }
+
+        return await MacReleaseFinder().catalog(byAddingReleasesTo: catalog, revalidate: skipCache)
+    }
+
+    private func fetchCatalog(for guest: VBGuestType, skipCache: Bool) async throws -> SoftwareCatalog {
         do {
             let remoteCatalog = try await fetchRemoteCatalog(for: guest, skipCache: skipCache)
 

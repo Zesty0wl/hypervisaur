@@ -47,7 +47,7 @@ struct RestoreImageSelectionStep: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help(Text("Reload"))
+                .help(Text("Check for New Versions"))
                 .keyboardShortcut("r", modifiers: .command)
             }
         }
