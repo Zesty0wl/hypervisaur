@@ -8,7 +8,7 @@
 
 https://github.com/user-attachments/assets/23ddd942-8b0a-49a5-a74b-4f0ab5acbc0f
 
-<p align="center"><sub>Starting Windows 11, following its logs, opening a shell in it from Terminal, and dragging files in and out. <a href="./assets/Video/Hypervisaur.mp4">Download the video</a></sub></p>
+<p align="center"><sub>Sharing folders with Windows 11, starting it from the rack, changing its resolution, dragging a 1 GB file into it, and seeing where the space goes in the Storage window. <a href="./assets/Video/Hypervisaur.mp4">Download the video</a></sub></p>
 
 ## Highlights
 
@@ -81,9 +81,9 @@ Hypervisaur includes an [MCP](https://modelcontextprotocol.io) server, so you ca
 
 ## About this project
 
-Hypervisaur is a fork of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) by Guilherme Rambo. Almost everything that makes it work for macOS and Linux virtual machines is his work, and it keeps VirtualBuddy's BSD license and copyright notice. It's an independent project, not affiliated with or endorsed by VirtualBuddy, so please report problems with Hypervisaur here rather than to VirtualBuddy.
+Hypervisaur started as a fork of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) by Guilherme Rambo, and has since been heavily reworked. VirtualBuddy's way of running macOS and Linux with Apple's Virtualization framework is still at its heart, and Hypervisaur keeps VirtualBuddy's BSD license and copyright notice. It's an independent project, not affiliated with or endorsed by VirtualBuddy, so please report problems with Hypervisaur here rather than to VirtualBuddy.
 
-Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for running shells and commands in any virtual machine and following its logs, and a server that lets coding agents create and run virtual machines. Much of that was written with [Claude Code](https://claude.com/claude-code), Anthropic's coding agent, and reviewed and tested on real virtual machines. VirtualBuddy doesn't accept contributions written with AI tools, which is why these changes live in a fork instead.
+Around that foundation, Hypervisaur has a library and settings of its own, Windows 11 virtual machines running with QEMU, with shared folders, clipboard sharing and saved sessions, an agent for running shells and commands in any virtual machine, following its logs and copying files in and out, a Storage window, and a server that lets coding agents create and run virtual machines. Much of that was written with [Claude Code](https://claude.com/claude-code), Anthropic's coding agent, and reviewed and tested on real virtual machines. VirtualBuddy doesn't accept contributions written with AI tools, which is why these changes live in a fork instead.
 
 ## Features
 
