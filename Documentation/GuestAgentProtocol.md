@@ -91,3 +91,19 @@ The agent replies `failed` if it can't catch drags, such as on Linux, or if nobo
 ## Version 3: the Linux socket
 
 Version 3 only changes how Linux agents are reached: they listen on virtio socket port 51781 as well as the console port. Hypervisaur updates Linux agents that report an earlier version through the agent itself, so that they don't have to be installed again from the disc. The frames are the same as version 2. The macOS agent listens on the socket from the guest app that comes with Hypervisaur 0.3, and still reports version 2.
+
+## Version 4: shared folders in Windows
+
+Windows agents report version 4. QEMU on the Mac has no virtiofs device, so Hypervisaur shares a Windows virtual machine's folders over SMB instead: QEMU's user networking starts Samba from Homebrew for each connection that Windows makes to port 445 of `10.0.2.4`, so only the virtual machine can reach it. Each folder is a share of its own, named after the folder, so that each can be read-only. Windows 11 doesn't connect to shares as a guest, so the shares have a user named `hypervisaur`, with a password that's kept in the virtual machine's bundle. `WindowsFolderSharing` sets Samba up, and the agent connects Windows to the shares.
+
+| Kind | Name | Direction | Payload |
+| --- | --- | --- | --- |
+| `0x0F` | shareFolders | to agent | Sent on channel 0 after each `hello`. The server's address, then, when something is shared, the user name, the password and the name of each share, in UTF-8, one per line. Only the address when nothing is shared. There's no reply. |
+
+Drives belong to the session of the user who connected them, so the agent starts itself as `HypervisaurAgent.exe mapshares` in the session of each user who's signed in, with their token, and passes the payload on its input. It does it again when someone signs in. The helper:
+
+1. Saves the user name and password in the user's credentials for the server, so that Windows can sign in again by itself, such as after a saved session is restored.
+2. Disconnects drives for shares on the server that aren't in the list.
+3. Connects each share that isn't connected yet to the last free drive letter, from Z: down, in the order of the list. While the network is still starting, it tries again every 2 seconds, 20 times. The drives aren't remembered, since the agent connects them at each sign-in, and Windows would otherwise complain at sign-in when they can't be reached.
+
+When nothing is shared, it disconnects every drive for the server and removes the saved credentials.

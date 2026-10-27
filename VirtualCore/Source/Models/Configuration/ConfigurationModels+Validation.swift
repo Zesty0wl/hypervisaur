@@ -47,7 +47,7 @@ public extension VBMacConfiguration {
         if !hardware.pointingDevice.kind.isSupportedByHost {
             errors.append("\(hardware.pointingDevice.kind.name) requires macOS 13 or later.")
         }
-        if hasSharedFolders, systemType.supportsSharedFolders {
+        if hasSharedFolders, systemType.supportsSharedFolders, !systemType.runsWithQEMU {
             warnings.append(VBMacConfiguration.fileSharingNotice)
         }
         if hardware.networkDevices.contains(where: { $0.kind == .bridge }), !VBNetworkDevice.appSupportsBridgedNetworking {
@@ -215,7 +215,7 @@ public extension VBGuestType {
     /// Guests that Virtualization can't run are run with QEMU instead.
     var runsWithQEMU: Bool { self == .windows }
 
-    var supportsSharedFolders: Bool { self != .windows }
+    var supportsSharedFolders: Bool { true }
 
     /// Whether the clipboard is shared through a SPICE agent in the guest. macOS guests share it through the guest app instead.
     var supportsClipboardSharing: Bool { self == .linux || self == .windows }

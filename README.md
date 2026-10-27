@@ -94,7 +94,7 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for ru
 - **macOS virtual machines** on macOS 12 or later, using Apple's Virtualization framework, with the macOS versions available to download kept up to date from this repository
 - **Linux virtual machines** from Ubuntu, Fedora, Debian and Kali, always downloading the newest image of each release, or from any ARM64 disc image
 - **Windows 11 virtual machines**, installed from Microsoft's Windows 11 ARM64 disc image, optionally without going through Windows Setup at all
-- Clipboard sharing for macOS, Linux and Windows guests, shared folders for macOS guests, and saved sessions for macOS and Windows guests
+- Clipboard sharing and shared folders for macOS, Linux and Windows guests, and saved sessions for macOS and Windows guests
 - Screenshots and screen recordings of any virtual machine, with its sound
 - Clones that run alongside the original and only take up the space of what's changed
 - A Storage window that shows what each virtual machine takes up, what deleting it would free, and which ones were copied from which
@@ -133,16 +133,18 @@ Choose Windows when creating a virtual machine. Hypervisaur first checks for wha
 | [QEMU](https://www.qemu.org) | Runs Windows with the Hypervisor framework, using the UEFI firmware that comes with it |
 | [swtpm](https://github.com/stefanberger/swtpm) | The TPM 2.0 that Windows 11 requires |
 | [wimlib](https://wimlib.net) | Copies the Windows installer onto a disk that the virtual machine can start from quickly |
+| [Samba](https://www.samba.org) | Shares folders on your Mac with Windows |
 | Windows drivers | The virtio drivers for the network adapter, display and other devices, signed by Microsoft. They're downloaded from [UTM's guest tools](https://github.com/utmapp/qemu/releases) and checked against a known checksum. The SPICE agent that shares the clipboard comes with Hypervisaur and is installed with them |
 
-QEMU, swtpm and wimlib come from Homebrew, which you need to install yourself. Then choose the Windows disc image and give the virtual machine a name. With **Set Up Windows Automatically**, Windows installs without asking anything and signs in to a local account with the name and optional password you choose. Without it, you go through Windows Setup as usual.
+QEMU, swtpm, wimlib and Samba come from Homebrew, which you need to install yourself. Then choose the Windows disc image and give the virtual machine a name. With **Set Up Windows Automatically**, Windows installs without asking anything and signs in to a local account with the name and optional password you choose. Without it, you go through Windows Setup as usual.
 
 Installing takes about 10 minutes. Windows Setup uses a basic 800×600 display; afterwards, Windows uses the resolution in the virtual machine's display settings.
 
 ### Things to know
 
 - You need your own Windows license. Windows is installed without a product key, so it isn't activated until you activate it.
-- Windows virtual machines use NAT networking and sound output. Shared folders and USB devices aren't available for Windows yet.
+- Windows virtual machines use NAT networking and sound output. USB devices aren't available for Windows yet.
+- Each shared folder appears in Windows as a network drive named after it, starting at Z:, once you've signed in. The Hypervisaur agent connects the drives for whoever signs in, and they're served by Samba on your Mac, which only the virtual machine can reach. Read-only folders can't be changed from Windows. Folders you add or remove are shared or disconnected the next time the virtual machine starts. If Samba isn't installed yet, the virtual machine's Sharing settings offer to install it.
 - Windows' own display settings don't offer any resolutions with its display driver, so change the resolution from the resolution menu in the window's toolbar, or from Guest › Resolution. See [Resolution and full screen](#resolution-and-full-screen).
 - Save State works for Windows as it does for macOS, except while Windows Setup is running. Windows' sound device can't be saved, so it's disconnected while the state is saved and connected again when Windows resumes. A saved state may not resume after QEMU is updated with Homebrew; Hypervisaur then offers to discard it.
 - Text you copy on your Mac can be pasted in Windows, and the other way round. You can turn this off with Share Clipboard in the virtual machine's settings.
@@ -280,7 +282,7 @@ To build a notarized installer package for release, run `Scripts/release.sh` wit
 
 ## Acknowledgements
 
-Hypervisaur stands on the work of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) and its contributors, and on [QEMU](https://www.qemu.org), [swtpm](https://github.com/stefanberger/swtpm), [wimlib](https://wimlib.net), [UTM](https://github.com/utmapp/UTM), the [virtio-win drivers](https://github.com/virtio-win/kvm-guest-drivers-windows), [Homebrew](https://brew.sh) and the [USB ID Repository](http://www.linux-usb.org/usb-ids.html). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licenses of the software that Hypervisaur includes or uses.
+Hypervisaur stands on the work of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) and its contributors, and on [QEMU](https://www.qemu.org), [swtpm](https://github.com/stefanberger/swtpm), [wimlib](https://wimlib.net), [Samba](https://www.samba.org), [UTM](https://github.com/utmapp/UTM), the [virtio-win drivers](https://github.com/virtio-win/kvm-guest-drivers-windows), [Homebrew](https://brew.sh) and the [USB ID Repository](http://www.linux-usb.org/usb-ids.html). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licenses of the software that Hypervisaur includes or uses.
 
 ## License
 

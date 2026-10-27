@@ -238,6 +238,20 @@ public final class GuestAgentConnection: @unchecked Sendable {
         return channel
     }
 
+    /// Whether the agent connects Windows to the folders that the Mac shares.
+    public var supportsSharedFolders: Bool {
+        (info?.protocolVersion ?? 0) >= GuestAgentFrame.sharedFoldersProtocolVersion
+    }
+
+    /// Tells the agent where the folders that the Mac shares are, so that it connects the users signed in to Windows to them,
+    /// or disconnects them if nothing is shared. The agent forgets when it starts afresh, so this is sent after each `hello`.
+    public func shareFolders(_ folders: GuestSharedFolders) throws {
+        guard supportsSharedFolders else {
+            throw Failure("The guest agent needs updating to connect to shared folders.")
+        }
+        try transport.send(GuestAgentFrame(.shareFolders, channel: 0, payload: folders.payload))
+    }
+
     /// Ends a transfer's channel on the Mac's side, such as when it's cancelled, so that nothing more is delivered for it.
     public func forget(_ channel: TransferChannel) {
         _ = lock.withLock { channels.removeValue(forKey: channel.id) }
@@ -333,7 +347,7 @@ public final class GuestAgentConnection: @unchecked Sendable {
             case nil:
                 break
             }
-        case .reset, .open, .input, .inputEnd, .resize, .terminate, .putFiles, .getFiles, .catchDrag:
+        case .reset, .open, .input, .inputEnd, .resize, .terminate, .putFiles, .getFiles, .catchDrag, .shareFolders:
             logger.warning("Ignoring unexpected frame of kind \(frame.kind.rawValue) from the guest agent")
         }
     }

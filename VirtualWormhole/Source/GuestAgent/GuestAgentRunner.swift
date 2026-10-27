@@ -81,7 +81,7 @@ final class GuestAgentRunner: @unchecked Sendable {
         case .terminate:
             program(frame.channel)?.terminate()
         case .hello, .output, .errorOutput, .exited, .failed, .putFiles, .fileHeader, .fileData, .filesEnd, .getFiles,
-             .acknowledge, .catchDrag, .transferSize, .transferred, .dragItems:
+             .acknowledge, .catchDrag, .transferSize, .shareFolders, .transferred, .dragItems:
             break
         }
     }

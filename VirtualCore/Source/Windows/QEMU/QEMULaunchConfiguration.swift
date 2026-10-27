@@ -38,6 +38,11 @@ struct QEMULaunchConfiguration {
     /// saved. QEMU adds a USB hub when a device takes the last free port, so the devices only end up on the same ports as
     /// when the state was saved if the sound device is plugged in at first, and unplugged before the state is loaded.
     var restoresSavedState = false
+    /// Serves the folders that are shared with Windows through the first network device. See ``WindowsFolderSharing``.
+    ///
+    /// It isn't part of the virtual machine's state, so it's left out of the arguments that a saved session is compared with,
+    /// and it's set up from the folders that are shared when the virtual machine starts.
+    var folderSharing: WindowsFolderSharing?
 
     /// QEMU's current version of the machine type.
     static let defaultMachineType = "virt"
@@ -153,6 +158,7 @@ struct QEMULaunchConfiguration {
         configuration.runtimePaths = .placeholder
         configuration.machineType = Self.defaultMachineType
         configuration.restoresSavedState = false
+        configuration.folderSharing = nil
 
         let bundlePath = model.bundleURL.path
         var arguments = try configuration.arguments().map { argument in
@@ -224,8 +230,14 @@ struct QEMULaunchConfiguration {
             }
 
             let netdevID = "net\(index)"
+            var netdev = "user,id=\(netdevID)"
+            /// QEMU runs Samba for each connection that Windows makes to the server's address, on the SMB port.
+            if index == 0, let folderSharing {
+                netdev += ",guestfwd=tcp:\(WindowsFolderSharing.serverAddress):445-cmd:\(folderSharing.serverCommand.qemuOptionEscaped)"
+            }
+
             arguments += [
-                "-netdev", "user,id=\(netdevID)",
+                "-netdev", netdev,
                 "-device", "virtio-net-pci,netdev=\(netdevID),mac=\(device.macAddress.lowercased())",
             ]
         }

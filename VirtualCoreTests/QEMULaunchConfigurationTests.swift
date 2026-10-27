@@ -226,6 +226,39 @@ struct QEMULaunchConfigurationTests {
         #expect(try makeConfiguration(for: vm).comparableArguments() != before)
     }
 
+    @Test func sambaServesSharedFoldersThroughTheFirstNetworkDevice() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        var configuration = makeConfiguration(for: vm)
+        configuration.folderSharing = WindowsFolderSharing(
+            directoryURL: URL(filePath: "/tmp/vbq-test,1/samba", directoryHint: .isDirectory),
+            serverURL: URL(filePath: "/opt/homebrew/sbin/samba-dot-org-smbd"),
+            password: "secret",
+            shares: []
+        )
+
+        let arguments = try configuration.arguments()
+
+        #expect(arguments.contains("user,id=net0,guestfwd=tcp:10.0.2.4:445-cmd:'/opt/homebrew/sbin/samba-dot-org-smbd' '--configfile=/tmp/vbq-test,,1/samba/smb.conf'"))
+    }
+
+    /// Folders can be shared or not when a saved session is restored, since QEMU doesn't save anything about the server.
+    @Test func comparableArgumentsIgnoreSharedFolders() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        var sharing = makeConfiguration(for: vm)
+        sharing.folderSharing = WindowsFolderSharing(
+            directoryURL: URL(filePath: "/tmp/vbq-test/samba", directoryHint: .isDirectory),
+            serverURL: URL(filePath: "/opt/homebrew/sbin/samba-dot-org-smbd"),
+            password: "secret",
+            shares: []
+        )
+
+        #expect(try sharing.comparableArguments() == makeConfiguration(for: vm).comparableArguments())
+    }
+
     @Test func windowsSessionsCanBeSaved() throws {
         let vm = try makeWindowsMachine()
 

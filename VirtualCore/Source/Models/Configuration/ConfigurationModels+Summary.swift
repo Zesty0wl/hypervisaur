@@ -44,20 +44,19 @@ public extension VBMacConfiguration {
     }
 
     var sharingSummary: String {
-        guard systemType.supportsSharedFolders else {
-            return clipboardSharingEnabled ? "Clipboard" : "None"
+        var items = [String]()
+
+        switch sharedFolders.count {
+        case 0: break
+        case 1: items.append("One Folder")
+        default: items.append("\(sharedFolders.count) Folders")
         }
 
-        let foldersSum: String
-        if sharedFolders.count > 1 {
-            foldersSum = "\(sharedFolders.count) Folders"
-        } else if sharedFolders.isEmpty {
-            foldersSum = ""
-        } else {
-            foldersSum = "One Folder"
+        if systemType.supportsClipboardSharing, clipboardSharingEnabled {
+            items.append("Clipboard")
         }
 
-        return foldersSum.isEmpty ? "None" : foldersSum
+        return items.isEmpty ? "None" : items.joined(separator: ", ")
     }
 
     var networkSummary: String {

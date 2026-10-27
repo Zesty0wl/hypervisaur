@@ -31,8 +31,8 @@ public extension VBMacConfiguration {
             warnings.append("Audio input isn’t available for Windows virtual machines.")
         }
 
-        if hasSharedFolders {
-            warnings.append("Shared folders aren’t available for Windows virtual machines.")
+        if hasSharedFolders, !hardware.networkDevices.contains(where: { $0.kind == .NAT }) {
+            warnings.append(Self.windowsSharedFoldersNeedNetworkNotice)
         }
 
         if !hardware.usbDevices.isEmpty {
@@ -41,4 +41,6 @@ public extension VBMacConfiguration {
 
         return SupportState(errors: errors, warnings: warnings)
     }
+
+    static let windowsSharedFoldersNeedNetworkNotice = "Windows reaches shared folders over the network, so they need a network device."
 }

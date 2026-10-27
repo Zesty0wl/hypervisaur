@@ -123,6 +123,10 @@ struct SharedFoldersManagementView: View {
                 guestAppNote
             }
 
+            if configuration.systemType == .windows, !sharedFoldersDisabled {
+                WindowsSharedFoldersNote(configuration: configuration)
+            }
+
             if configuration.systemType == .linux {
                 Group {
                     let rosettaToggleBind = if VBMacConfiguration.rosettaSupported && !rosettaUnsupported {
@@ -241,6 +245,19 @@ struct SharedFoldersManagementView: View {
     
     @ViewBuilder
     private var mountTip: some View {
+        if configuration.systemType == .windows {
+            Text(WindowsSharedFoldersNote.explanation)
+                .foregroundColor(.white)
+                .padding()
+                .frame(width: 360, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            unixMountTip
+        }
+    }
+
+    @ViewBuilder
+    private var unixMountTip: some View {
         let tooltipCommon = """
         To make your shared folders available in the virtual machine,
         run the following command in Terminal (Applications > Utilities > Terminal):
@@ -378,6 +395,61 @@ struct SharedFoldersManagementView: View {
         }
 
         return "Are you sure you'd like to remove \"\(folder.shortNameForDialogs)\" from the shared folders?"
+    }
+}
+
+/// Says where Windows shows the shared folders, and offers to install Samba, which shares them, if it's missing.
+private struct WindowsSharedFoldersNote: View {
+    var configuration: VBMacConfiguration
+
+    @ObservedObject private var dependencies = WindowsHostDependencies.shared
+
+    static let explanation = "Each shared folder appears as a network drive in File Explorer once you’ve signed in to Windows. Changes to them take effect the next time the virtual machine starts."
+
+    private var sambaStatus: WindowsHostDependencies.Status { dependencies.status(for: .samba) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !configuration.hardware.networkDevices.contains(where: { $0.kind == .NAT }) {
+                Label(VBMacConfiguration.windowsSharedFoldersNeedNetworkNotice, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+            }
+
+            switch sambaStatus {
+            case .installed, .unknown:
+                Text(Self.explanation)
+                    .foregroundStyle(.secondary)
+            case .installing(let progress):
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(progress ?? "Installing Samba…")
+                        .foregroundStyle(.secondary)
+                }
+            case .missing, .failed:
+                Label("Windows needs Samba from Homebrew to share folders with your Mac.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+
+                if case .failed(let message) = sambaStatus {
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                if dependencies.status(for: .homebrew).isInstalled {
+                    Button("Install Samba") {
+                        Task { await dependencies.installMissing() }
+                    }
+                    .controlSize(.small)
+                    .disabled(!dependencies.canInstallMissing)
+                } else {
+                    Text("Install [Homebrew](\(Homebrew.websiteURL.absoluteString)) first, then come back here to install Samba.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .font(.caption)
+        .task { await dependencies.refresh() }
     }
 }
 

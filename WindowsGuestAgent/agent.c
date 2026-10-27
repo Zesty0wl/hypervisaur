@@ -1,5 +1,6 @@
 /*
- * The Hypervisaur agent for Windows, which runs programs in the virtual machine for the Mac, and copies files and drags between them.
+ * The Hypervisaur agent for Windows, which runs programs in the virtual machine for the Mac, copies files and drags between them,
+ * and connects the users signed in to Windows to the folders that the Mac shares.
  *
  * It runs as a service, and talks to Hypervisaur over the virtio serial port named hypervisaur.agent, using the frames that
  * Documentation/GuestAgentProtocol.md describes. Each program runs on a channel of its own, in a job object so that stopping it also stops
@@ -21,6 +22,8 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <userenv.h>
+#include <wincred.h>
+#include <winnetwk.h>
 #include <wtsapi32.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -32,7 +35,7 @@
 
 #define SERVICE_NAME L"HypervisaurAgent"
 #define PORT_PATH L"\\\\.\\Global\\hypervisaur.agent"
-#define PROTOCOL_VERSION 2
+#define PROTOCOL_VERSION 4
 
 #define HEADER_SIZE 9
 #define MAX_PAYLOAD (1 << 20)
@@ -66,6 +69,11 @@
 #define DRAG_HELPER_TIMEOUT_MS 10500
 #define DRAG_CATCHER_SIZE 64
 
+/* How long connecting a user to the shared folders may take, and how often connecting is tried while the network starts. */
+#define SHARE_HELPER_TIMEOUT_MS 60000
+#define SHARE_CONNECT_ATTEMPTS 20
+#define SHARE_CONNECT_RETRY_DELAY_MS 2000
+
 /* How many names are tried, such as `Name (2).ext`, when the name of an item is already used. */
 #define MAX_NAME_ATTEMPTS 10000
 
@@ -96,6 +104,7 @@ enum {
     FRAME_ACKNOWLEDGE = 0x0C,
     FRAME_CATCH_DRAG = 0x0D,
     FRAME_TRANSFER_SIZE = 0x0E,
+    FRAME_SHARE_FOLDERS = 0x0F,
 
     FRAME_HELLO = 0x41,
     FRAME_OUTPUT = 0x42,
@@ -2352,28 +2361,30 @@ static wchar_t *modulePath(void) {
     return NULL;
 }
 
-/* Starts the drag catcher in the session of the user signed in at the display, with a pipe for its output. */
-static BOOL startDragCatcher(PROCESS_INFORMATION *process, HANDLE *output, char **error) {
-    HANDLE token;
-    if (!openConsoleUser(&token, error)) return FALSE;
-
+/*
+ * Starts the agent as a helper in a user's session, such as `dragcatcher`, with a pipe for its input if it reads from the agent,
+ * or for its output otherwise, which it only inherits. With a NULL token, which is the case in the `console` mode, the helper
+ * runs as the agent's own user. Returns the agent's end of the pipe in *pipe, or FALSE with the error in *status.
+ */
+static BOOL startHelper(HANDLE token, const wchar_t *mode, BOOL helperReads, PROCESS_INFORMATION *process, HANDLE *pipe, DWORD *status) {
     wchar_t *program = modulePath();
-    size_t lineSize = program ? wcslen(program) + 32 : 0;
+    size_t lineSize = program ? wcslen(program) + wcslen(mode) + 4 : 0;
     wchar_t *line = program ? malloc(lineSize * sizeof(wchar_t)) : NULL;
-    if (line) swprintf(line, lineSize, L"\"%ls\" dragcatcher", program);
+    if (line) swprintf(line, lineSize, L"\"%ls\" %ls", program, mode);
 
     void *environment = NULL;
     if (token && !CreateEnvironmentBlock(&environment, token, FALSE)) {
-        logMessage("Couldn't make the environment of the user signed in to Windows (error %lu)", GetLastError());
+        logMessage("Couldn't make the environment of a user signed in to Windows (error %lu)", GetLastError());
         environment = NULL;
     }
 
     AcquireSRWLockExclusive(&inheritanceLock);
 
     HANDLE readEnd = NULL, writeEnd = NULL;
-    BOOL prepared = line && createPipe(&readEnd, &writeEnd, FALSE);
+    BOOL prepared = line && createPipe(&readEnd, &writeEnd, helperReads);
+    HANDLE helperEnd = helperReads ? readEnd : writeEnd;
 
-    /* The catcher only inherits its output, and not handles that other threads made inheritable to start programs of their own. */
+    /* The helper only inherits its end of the pipe, and not handles that other threads made inheritable to start programs of their own. */
     STARTUPINFOEXW startup = {0};
     startup.StartupInfo.cb = sizeof(startup);
     BOOL hasAttributes = FALSE;
@@ -2383,15 +2394,19 @@ static BOOL startDragCatcher(PROCESS_INFORMATION *process, HANDLE *output, char 
         startup.lpAttributeList = malloc(attributesSize);
         hasAttributes = startup.lpAttributeList && InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &attributesSize);
         prepared = hasAttributes
-            && UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &writeEnd, sizeof(HANDLE), NULL, NULL);
+            && UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &helperEnd, sizeof(HANDLE), NULL, NULL);
     }
 
     wchar_t desktop[] = L"winsta0\\default";
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdOutput = writeEnd;
+    if (helperReads) {
+        startup.StartupInfo.hStdInput = helperEnd;
+    } else {
+        startup.StartupInfo.hStdOutput = helperEnd;
+    }
     if (token) startup.StartupInfo.lpDesktop = desktop;
 
-    /* The catcher doesn't have a console, which would start a console host that could keep a copy of its output. */
+    /* The helper doesn't have a console, which would start a console host that could keep a copy of its output. */
     DWORD flags = DETACHED_PROCESS | EXTENDED_STARTUPINFO_PRESENT | (environment ? CREATE_UNICODE_ENVIRONMENT : 0);
     BOOL started = FALSE;
     if (prepared) {
@@ -2399,29 +2414,41 @@ static BOOL startDragCatcher(PROCESS_INFORMATION *process, HANDLE *output, char 
             ? CreateProcessAsUserW(token, program, line, NULL, NULL, TRUE, flags, environment, NULL, &startup.StartupInfo, process)
             : CreateProcessW(program, line, NULL, NULL, TRUE, flags, NULL, NULL, &startup.StartupInfo, process);
     }
-    DWORD status = prepared ? GetLastError() : (line ? GetLastError() : ERROR_NOT_ENOUGH_MEMORY);
+    *status = prepared ? GetLastError() : (line ? GetLastError() : ERROR_NOT_ENOUGH_MEMORY);
 
-    /* The catcher has its own copy of its output. */
-    if (writeEnd) CloseHandle(writeEnd);
+    /* The helper has its own copy of its end of the pipe. */
+    if (helperEnd) CloseHandle(helperEnd);
     ReleaseSRWLockExclusive(&inheritanceLock);
 
     if (hasAttributes) DeleteProcThreadAttributeList(startup.lpAttributeList);
     free(startup.lpAttributeList);
     if (environment) DestroyEnvironmentBlock(environment);
-    if (token) CloseHandle(token);
     free(program);
     free(line);
 
+    HANDLE agentEnd = helperReads ? writeEnd : readEnd;
     if (!started) {
-        if (readEnd) CloseHandle(readEnd);
-        *error = formatText("Couldn't start catching drags (error %lu).", status);
+        if (agentEnd) CloseHandle(agentEnd);
         return FALSE;
     }
 
     CloseHandle(process->hThread);
     process->hThread = NULL;
-    *output = readEnd;
+    *pipe = agentEnd;
     return TRUE;
+}
+
+/* Starts the drag catcher in the session of the user signed in at the display, with a pipe for its output. */
+static BOOL startDragCatcher(PROCESS_INFORMATION *process, HANDLE *output, char **error) {
+    HANDLE token;
+    if (!openConsoleUser(&token, error)) return FALSE;
+
+    DWORD status;
+    BOOL started = startHelper(token, L"dragcatcher", FALSE, process, output, &status);
+    if (token) CloseHandle(token);
+
+    if (!started) *error = formatText("Couldn't start catching drags (error %lu).", status);
+    return started;
 }
 
 /*
@@ -2711,6 +2738,292 @@ static int runDragCatcher(void) {
     return status;
 }
 
+/* MARK: - Shared folders */
+
+/*
+ * The Mac shares each of its folders as a share of its own with Samba, which Windows reaches over the network, and sends
+ * `shareFolders` after each `hello` with the server's address, the user name and password to sign in to it with, and the
+ * shares. Drives belong to the session of the user who connected them, so the agent connects each user who's signed in, in
+ * their own session: it starts itself as `mapshares` with the user's token, and passes the details on its input. It does it
+ * again whenever someone signs in. When nothing is shared, the details only have the server, and users are disconnected from it.
+ */
+
+static SRWLOCK sharesLock = SRWLOCK_INIT;
+/* The latest details from the Mac, which are NULL until it sends them. */
+static uint8_t *shareDetails;
+static uint32_t shareDetailsLength;
+/* Set when the details change or someone signs in, which wakes the thread that connects users to the share. */
+static HANDLE sharesChanged;
+
+static void receiveSharedFolders(const uint8_t *payload, uint32_t length) {
+    if (!isValidUTF8((const char *)payload, length)) {
+        logMessage("Ignoring shared folders that aren't described in UTF-8");
+        return;
+    }
+
+    uint8_t *details = malloc(length > 0 ? length : 1);
+    if (!details) {
+        logMessage("Couldn't keep the shared folders: %s", OUT_OF_MEMORY);
+        return;
+    }
+    memcpy(details, payload, length);
+
+    AcquireSRWLockExclusive(&sharesLock);
+    free(shareDetails);
+    shareDetails = details;
+    shareDetailsLength = length;
+    ReleaseSRWLockExclusive(&sharesLock);
+
+    SetEvent(sharesChanged);
+}
+
+/* Connects a user to the share, or disconnects them, by running `mapshares` in their session, and waits for it to finish. */
+static void connectUser(HANDLE token, DWORD session, const uint8_t *details, uint32_t length) {
+    PROCESS_INFORMATION process = {0};
+    HANDLE input = NULL;
+    DWORD status;
+    if (!startHelper(token, L"mapshares", TRUE, &process, &input, &status)) {
+        logMessage("Couldn't connect session %lu to the shared folders (error %lu)", session, status);
+        return;
+    }
+
+    DWORD written = 0;
+    if (!WriteFile(input, details, length, &written, NULL) || written != length) {
+        logMessage("Couldn't pass the shared folders to session %lu (error %lu)", session, GetLastError());
+    }
+    CloseHandle(input);
+
+    HANDLE handles[] = { process.hProcess, stopEvent };
+    DWORD result = WaitForMultipleObjects(2, handles, FALSE, SHARE_HELPER_TIMEOUT_MS);
+    if (result != WAIT_OBJECT_0) {
+        if (result == WAIT_TIMEOUT) logMessage("Connecting session %lu to the shared folders didn't finish in time", session);
+        TerminateProcess(process.hProcess, 1);
+    } else if (GetExitCodeProcess(process.hProcess, &status) && status != 0) {
+        logMessage("Couldn't connect session %lu to the shared folders (error %lu)", session, status);
+    }
+    CloseHandle(process.hProcess);
+}
+
+static DWORD WINAPI connectSharedFolders(void *context) {
+    (void)context;
+
+    HANDLE events[] = { stopEvent, sharesChanged };
+    while (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0 + 1) {
+        AcquireSRWLockShared(&sharesLock);
+        uint32_t length = shareDetailsLength;
+        BOOL hasDetails = shareDetails != NULL;
+        uint8_t *details = hasDetails ? malloc(length > 0 ? length : 1) : NULL;
+        if (details) memcpy(details, shareDetails, length);
+        ReleaseSRWLockShared(&sharesLock);
+
+        if (!details) {
+            if (hasDetails) logMessage("Couldn't connect to the shared folders: %s", OUT_OF_MEMORY);
+            continue;
+        }
+
+        if (isConsoleMode) {
+            DWORD session = 0;
+            ProcessIdToSessionId(GetCurrentProcessId(), &session);
+            connectUser(NULL, session, details, length);
+        } else {
+            WTS_SESSION_INFOW *sessions = NULL;
+            DWORD count = 0;
+            if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &sessions, &count)) {
+                for (DWORD index = 0; index < count && !isStopping; index++) {
+                    /* Sessions without a user, such as the services' session and the sign-in screen, don't have a token. */
+                    HANDLE token;
+                    if (sessions[index].SessionId == 0 || !WTSQueryUserToken(sessions[index].SessionId, &token)) continue;
+                    connectUser(token, sessions[index].SessionId, details, length);
+                    CloseHandle(token);
+                }
+                WTSFreeMemory(sessions);
+            } else {
+                logMessage("Couldn't list who's signed in to connect them to the shared folders (error %lu)", GetLastError());
+            }
+        }
+
+        free(details);
+    }
+    return 0;
+}
+
+/*
+ * `HypervisaurAgent.exe mapshares` connects its user to the shared folders, with the details that the agent passes on its
+ * input. Each share gets the last drive letter that's free, unless it has one already, and drives for shares on the server that
+ * aren't shared any more are disconnected. Drives aren't remembered, since the agent connects them each time someone signs in,
+ * and Windows would otherwise complain at sign-in when they can't be reached. Windows keeps the password, so that it can sign in
+ * to the server again by itself, such as after a saved session is restored. With only the server, every drive for it is
+ * disconnected, and the password forgotten. It exits with 0, or with the first error that it couldn't get past.
+ */
+
+/* Returns the name of the share that a drive is connected to if it's on the server, such as `Share` for `\\server\Share`, or NULL. */
+static const wchar_t *shareOnServer(const wchar_t *remote, const wchar_t *server) {
+    size_t length = wcslen(server);
+    if (!hasPrefix(remote, L"\\\\") || _wcsnicmp(remote + 2, server, length) != 0 || remote[2 + length] != L'\\') return NULL;
+    return remote + 3 + length;
+}
+
+/* Whether the drive letter isn't used, including by a network drive that's remembered but not connected. */
+static BOOL isDriveFree(wchar_t letter) {
+    if (GetLogicalDrives() & (1u << (letter - L'A'))) return FALSE;
+
+    wchar_t drive[] = { letter, L':', 0 };
+    wchar_t remote[MAX_PATH];
+    DWORD size = MAX_PATH;
+    DWORD result = WNetGetConnectionW(drive, remote, &size);
+    return result != NO_ERROR && result != ERROR_CONNECTION_UNAVAIL && result != ERROR_MORE_DATA;
+}
+
+/* Errors that connecting gives while the network is still starting, such as just after signing in. */
+static BOOL isTransientNetworkError(DWORD error) {
+    switch (error) {
+    case ERROR_BAD_NETPATH:
+    case ERROR_NETWORK_UNREACHABLE:
+    case ERROR_HOST_UNREACHABLE:
+    case ERROR_NO_NETWORK:
+    case ERROR_UNEXP_NET_ERR:
+    case ERROR_SEM_TIMEOUT:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+/* Connects the share to the last drive letter that's free, trying again for a while if the network isn't ready. */
+static DWORD connectShare(const wchar_t *server, const wchar_t *share, wchar_t *user, wchar_t *password) {
+    size_t pathSize = wcslen(server) + wcslen(share) + 4;
+    wchar_t *path = malloc(pathSize * sizeof(wchar_t));
+    if (!path) return ERROR_NOT_ENOUGH_MEMORY;
+    swprintf(path, pathSize, L"\\\\%ls\\%ls", server, share);
+
+    DWORD result = ERROR_NO_MORE_DEVICES;
+    for (unsigned attempt = 0; attempt < SHARE_CONNECT_ATTEMPTS; attempt++) {
+        result = ERROR_NO_MORE_DEVICES;
+
+        for (wchar_t letter = L'Z'; letter >= L'D'; letter--) {
+            if (!isDriveFree(letter)) continue;
+
+            wchar_t drive[] = { letter, L':', 0 };
+            NETRESOURCEW resource = {0};
+            resource.dwType = RESOURCETYPE_DISK;
+            resource.lpLocalName = drive;
+            resource.lpRemoteName = path;
+            result = WNetAddConnection2W(&resource, password, user, 0);
+
+            /* Something else took the letter in the meantime. */
+            if (result != ERROR_ALREADY_ASSIGNED && result != ERROR_DEVICE_ALREADY_REMEMBERED) break;
+        }
+
+        if (!isTransientNetworkError(result)) break;
+        Sleep(SHARE_CONNECT_RETRY_DELAY_MS);
+    }
+
+    free(path);
+    return result;
+}
+
+/* Disconnects drives for shares on the server that aren't in the list, and returns which of the shares are connected already. */
+static DWORD disconnectOtherShares(const wchar_t *server, wchar_t **shares, size_t shareCount, BOOL *isConnected) {
+    DWORD firstError = NO_ERROR;
+
+    for (wchar_t letter = L'A'; letter <= L'Z'; letter++) {
+        wchar_t drive[] = { letter, L':', 0 };
+        wchar_t remote[MAX_PATH];
+        DWORD size = MAX_PATH;
+        DWORD status = WNetGetConnectionW(drive, remote, &size);
+        if (status != NO_ERROR && status != ERROR_CONNECTION_UNAVAIL) continue;
+
+        const wchar_t *share = shareOnServer(remote, server);
+        if (!share) continue;
+
+        size_t index = 0;
+        while (index < shareCount && _wcsicmp(shares[index], share) != 0) index++;
+
+        /* A drive that's remembered but not connected is connected again afresh. */
+        if (index < shareCount && status == NO_ERROR && !isConnected[index]) {
+            isConnected[index] = TRUE;
+            continue;
+        }
+
+        DWORD result = WNetCancelConnection2W(drive, CONNECT_UPDATE_PROFILE, TRUE);
+        if (result != NO_ERROR && result != ERROR_NOT_CONNECTED && firstError == NO_ERROR) firstError = result;
+    }
+    return firstError;
+}
+
+static int runShareMapper(void) {
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    Buffer details = {0};
+    char chunk[1024];
+    DWORD count;
+    while (ReadFile(input, chunk, sizeof(chunk), &count, NULL) && count > 0) {
+        if (details.length + count > 64 * 1024 || !appendBytes(&details, chunk, count)) {
+            free(details.bytes);
+            return ERROR_INVALID_DATA;
+        }
+    }
+    if (!details.bytes) return ERROR_INVALID_DATA;
+
+    /* The details are the server, then the user name, the password and the shares when something is shared, one per line. */
+    size_t lineCount = 1;
+    for (size_t index = 0; index < details.length; index++) {
+        if (details.bytes[index] == '\n') lineCount++;
+    }
+
+    wchar_t **lines = calloc(lineCount, sizeof(wchar_t *));
+    BOOL isValid = lines != NULL && (lineCount == 1 || lineCount >= 3);
+    size_t line = 0, lineStart = 0;
+    for (size_t index = 0; isValid && index <= details.length; index++) {
+        if (index < details.length && details.bytes[index] != '\n') continue;
+
+        lines[line] = wideFromUTF8(details.bytes + lineStart, index - lineStart);
+        isValid = lines[line] != NULL && lines[line][0] != 0;
+        line++;
+        lineStart = index + 1;
+    }
+    free(details.bytes);
+
+    DWORD result = ERROR_INVALID_DATA;
+    if (isValid && lineCount == 1) {
+        wchar_t *server = lines[0];
+        result = disconnectOtherShares(server, NULL, 0, NULL);
+        if (!CredDeleteW(server, CRED_TYPE_DOMAIN_PASSWORD, 0) && GetLastError() != ERROR_NOT_FOUND && result == NO_ERROR) result = GetLastError();
+    } else if (isValid) {
+        wchar_t *server = lines[0], *user = lines[1], *password = lines[2];
+        wchar_t **shares = lines + 3;
+        size_t shareCount = lineCount - 3;
+
+        CREDENTIALW credential = {0};
+        credential.Type = CRED_TYPE_DOMAIN_PASSWORD;
+        credential.TargetName = server;
+        credential.UserName = user;
+        credential.CredentialBlob = (BYTE *)password;
+        credential.CredentialBlobSize = (DWORD)(wcslen(password) * sizeof(wchar_t));
+        credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+        result = CredWriteW(&credential, 0) ? NO_ERROR : GetLastError();
+
+        BOOL *isConnected = calloc(shareCount > 0 ? shareCount : 1, sizeof(BOOL));
+        if (!isConnected) result = ERROR_NOT_ENOUGH_MEMORY;
+
+        if (result == NO_ERROR) result = disconnectOtherShares(server, shares, shareCount, isConnected);
+
+        /* The shares are connected in order, so that the first folder on the Mac gets Z:, unless it was connected already. */
+        for (size_t index = 0; isConnected && index < shareCount; index++) {
+            if (isConnected[index]) continue;
+            DWORD status = connectShare(server, shares[index], user, password);
+            if (status != NO_ERROR && result == NO_ERROR) result = status;
+        }
+        free(isConnected);
+    }
+
+    if (lines) {
+        if (lineCount >= 3 && lines[2]) SecureZeroMemory(lines[2], wcslen(lines[2]) * sizeof(wchar_t));
+        for (size_t index = 0; index < lineCount; index++) free(lines[index]);
+        free(lines);
+    }
+    return (int)result;
+}
+
 /* MARK: - Protocol */
 
 static void sendHello(void) {
@@ -2785,6 +3098,9 @@ static void handleFrame(uint8_t kind, uint32_t channel, const uint8_t *payload, 
     case FRAME_CATCH_DRAG:
         if (!startTransfer(channel, payload, length, catchDrag)) failOpen(channel, "Couldn't start catching drags");
         break;
+    case FRAME_SHARE_FOLDERS:
+        receiveSharedFolders(payload, length);
+        break;
     default:
         break;
     }
@@ -2812,6 +3128,9 @@ static DWORD WINAPI runAgent(void *context) {
 
     OVERLAPPED overlapped = {0};
     overlapped.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+
+    HANDLE sharesThread = CreateThread(NULL, 0, connectSharedFolders, NULL, 0, NULL);
+    if (!sharesThread) logMessage("Couldn't start connecting to shared folders (error %lu)", GetLastError());
 
     /* Failures are only logged when they change, since the port is opened again every few seconds while they last. */
     DWORD lastError = (DWORD)-1;
@@ -2877,6 +3196,11 @@ static DWORD WINAPI runAgent(void *context) {
         if (!isStopping) WaitForSingleObject(stopEvent, 1000);
     }
 
+    if (sharesThread) {
+        WaitForSingleObject(sharesThread, INFINITE);
+        CloseHandle(sharesThread);
+    }
+
     CloseHandle(overlapped.hEvent);
     free(buffer);
     return 0;
@@ -2887,7 +3211,7 @@ static DWORD WINAPI runAgent(void *context) {
 static void reportStatus(DWORD state) {
     serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     serviceStatus.dwCurrentState = state;
-    serviceStatus.dwControlsAccepted = state == SERVICE_RUNNING ? SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN : 0;
+    serviceStatus.dwControlsAccepted = state == SERVICE_RUNNING ? SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_SESSIONCHANGE : 0;
     serviceStatus.dwWin32ExitCode = NO_ERROR;
     SetServiceStatus(statusHandle, &serviceStatus);
 }
@@ -2904,13 +3228,18 @@ static void stopAgent(void) {
 }
 
 static DWORD WINAPI handleControl(DWORD control, DWORD type, void *data, void *context) {
-    (void)type;
     (void)data;
     (void)context;
 
     if (control == SERVICE_CONTROL_STOP || control == SERVICE_CONTROL_SHUTDOWN) {
         reportStatus(SERVICE_STOP_PENDING);
         stopAgent();
+        return NO_ERROR;
+    }
+
+    /* Whoever signs in is connected to the shared folders. */
+    if (control == SERVICE_CONTROL_SESSIONCHANGE) {
+        if (type == WTS_SESSION_LOGON) SetEvent(sharesChanged);
         return NO_ERROR;
     }
     return control == SERVICE_CONTROL_INTERROGATE ? NO_ERROR : ERROR_CALL_NOT_IMPLEMENTED;
@@ -2949,9 +3278,15 @@ int wmain(int argumentCount, wchar_t **arguments) {
         return runDragCatcher();
     }
 
+    /* `HypervisaurAgent.exe mapshares` connects its user to the shared folders, which the agent starts in each signed-in user's session. */
+    if (argumentCount > 1 && wcscmp(arguments[1], L"mapshares") == 0) {
+        return runShareMapper();
+    }
+
     InitializeCriticalSection(&logLock);
     InitializeCriticalSection(&writeLock);
     stopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    sharesChanged = CreateEventW(NULL, FALSE, FALSE, NULL);
     openLog();
 
     /* `HypervisaurAgent.exe console` runs the agent without the service manager, for testing. */

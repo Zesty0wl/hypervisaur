@@ -31,7 +31,7 @@ public enum VirtualBuddyManagedPreferences: ManagedPreferencesNamespace {
 public extension ManagedPreference where Namespace == VirtualBuddyManagedPreferences, Value == Bool {
     static let disableSharedFolders = Self("DisableSharedFolders", title: "Disable Shared Folders", default: false) {
         Summary("Disables host folder sharing for all virtual machines.")
-        Discussion("Deploy this Boolean in the Hypervisaur preference domain using an MDM configuration profile. It applies to macOS and Linux guests, including existing virtual machines.")
+        Discussion("Deploy this Boolean in the Hypervisaur preference domain using an MDM configuration profile. It applies to macOS, Linux and Windows guests, including existing virtual machines.")
         DefaultBehavior("Shared folders are available when this preference is absent or false. Invalid values fall back to false.")
         Behavior("Disables shared folder controls and rejects attempts to add folders, with a policy message in the log.")
         Behavior("Ignores saved folder mappings when starting or restoring a VM. Mappings remain saved so they can be used after the restriction is removed.")

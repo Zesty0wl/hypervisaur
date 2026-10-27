@@ -8,6 +8,7 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
     case qemu
     case swtpm
     case wimlib
+    case samba
     case windowsDrivers
 
     public var id: RawValue { rawValue }
@@ -18,6 +19,7 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "QEMU"
         case .swtpm: "swtpm"
         case .wimlib: "wimlib"
+        case .samba: "Samba"
         case .windowsDrivers: "Windows Drivers"
         }
     }
@@ -28,6 +30,7 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "Runs Windows using the Hypervisor framework, with UEFI firmware for ARM."
         case .swtpm: "Software TPM 2.0, required by Windows 11."
         case .wimlib: "Prepares the Windows installer so the virtual machine can read it quickly."
+        case .samba: "Shares folders on your Mac with Windows."
         case .windowsDrivers: "Network and other virtio drivers for Windows, signed by Microsoft, downloaded from UTM’s guest tools on GitHub, and the SPICE agent that shares the clipboard."
         }
     }
@@ -38,6 +41,7 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "cpu"
         case .swtpm: "lock.shield"
         case .wimlib: "doc.zipper"
+        case .samba: "folder"
         case .windowsDrivers: "network"
         }
     }
@@ -49,6 +53,7 @@ public enum WindowsHostDependency: String, CaseIterable, Identifiable, Sendable 
         case .qemu: "qemu"
         case .swtpm: "swtpm"
         case .wimlib: "wimlib"
+        case .samba: "samba"
         }
     }
 }
@@ -217,6 +222,8 @@ public final class WindowsHostDependencies: ObservableObject {
             return FileManager.default.isExecutableFile(atPath: toolchain.swtpmURL.path)
         case .wimlib:
             return FileManager.default.isExecutableFile(atPath: toolchain.wimlibURL.path)
+        case .samba:
+            return FileManager.default.isExecutableFile(atPath: WindowsFolderSharing.serverURL(in: brew).path)
         case .windowsDrivers:
             return WindowsDrivers.isInstalled
         }

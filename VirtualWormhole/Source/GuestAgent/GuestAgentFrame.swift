@@ -38,6 +38,8 @@ public struct GuestAgentFrame: Equatable, Sendable {
         case catchDrag = 0x0D
         /// The size of a transfer, sent before its first item. See ``GuestTransferSize``.
         case transferSize = 0x0E
+        /// Tells a Windows agent how to reach the folders that the Mac shares, on channel 0. See ``GuestSharedFolders``.
+        case shareFolders = 0x0F
 
         /// Sent by the agent on channel 0 when it starts and after ``reset``. See ``GuestAgentInfo``.
         case hello = 0x41
@@ -84,6 +86,9 @@ public struct GuestAgentFrame: Equatable, Sendable {
 
     /// The first protocol version with file transfers and drags.
     public static let fileTransferProtocolVersion: UInt32 = 2
+
+    /// The first protocol version where Windows agents connect to the folders that the Mac shares.
+    public static let sharedFoldersProtocolVersion: UInt32 = 4
 
     /// The virtio socket port that agents in Linux and macOS guests listen on, which is much faster than their other links.
     public static let socketPort: UInt32 = 51_781
@@ -196,6 +201,58 @@ public struct GuestAgentInfo: Equatable, Sendable {
         guard payload.count >= 4 else { throw GuestAgentError("The guest agent's greeting is incomplete.") }
         protocolVersion = payload.littleEndianUInt32(at: payload.startIndex)
         system = String(decoding: payload.dropFirst(4), as: UTF8.self)
+    }
+}
+
+/// Where a Windows agent finds the folders that the Mac shares, and how it signs in to them.
+///
+/// Each folder is a share of its own on the Mac's server, which Windows shows as a network drive. Windows doesn't connect to
+/// shares without signing in, so they have a user name and password of their own. When nothing is shared, there are no
+/// credentials or shares, which tells the agent to disconnect from the server.
+public struct GuestSharedFolders: Equatable, Sendable {
+    public struct Credentials: Equatable, Sendable {
+        public var userName: String
+        public var password: String
+
+        public init(userName: String, password: String) {
+            self.userName = userName
+            self.password = password
+        }
+    }
+
+    /// The address of the Mac's server in the guest.
+    public var server: String
+    /// `nil` when nothing is shared.
+    public var credentials: Credentials?
+    /// The names of the shares, one for each folder, in the order the folders are listed on the Mac.
+    public var shareNames: [String]
+
+    public init(server: String, credentials: Credentials?, shareNames: [String]) {
+        self.server = server
+        self.credentials = credentials
+        self.shareNames = shareNames
+    }
+
+    /// The server, then the user name, password and the share names when something is shared, in UTF-8, one per line.
+    public var payload: Data {
+        var lines = [server]
+        if let credentials {
+            lines += [credentials.userName, credentials.password] + shareNames
+        }
+        return Data(lines.joined(separator: "\n").utf8)
+    }
+
+    public init(payload: Data) throws {
+        let lines = String(decoding: payload, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        switch lines.count {
+        case 1:
+            self.init(server: lines[0], credentials: nil, shareNames: [])
+        case 3...:
+            self.init(server: lines[0], credentials: Credentials(userName: lines[1], password: lines[2]), shareNames: Array(lines[3...]))
+        default:
+            throw GuestAgentError("The description of the shared folders is invalid.")
+        }
     }
 }
 

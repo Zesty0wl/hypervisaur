@@ -2,6 +2,8 @@ import Foundation
 import Combine
 import CoreGraphics
 import OSLog
+import VirtualWormhole
+import ManagedPreferencesKit
 
 /// A virtual machine that runs in a QEMU process, used for guests that Virtualization can't run.
 @MainActor
@@ -40,6 +42,10 @@ public final class QEMUVirtualMachine: ObservableObject {
     let guestAgentInfo = GuestAgentInfoRelay()
     private var guestAgentServer: GuestAgentServer?
     private var runtimeDirectoryURL: URL?
+    /// Serves the shared folders while the virtual machine runs, if any are shared. See ``WindowsFolderSharing``.
+    private var folderSharing: WindowsFolderSharing?
+    private var sharedFoldersObservation: AnyCancellable?
+    private var sharedFoldersPolicyObservation: ManagedPreferenceObservation?
     private var isStopExpected = false
     private var didReportStop = false
     private var isRestarting = false
@@ -249,6 +255,7 @@ public final class QEMUVirtualMachine: ObservableObject {
         )
         configuration.machineType = machineType
         configuration.restoresSavedState = restoration != nil
+        configuration.folderSharing = prepareFolderSharing(in: runtimeDirectoryURL)
         let arguments = try configuration.arguments()
 
         try launchTPM(toolchain: toolchain, socketURL: paths.tpmSocket)
@@ -468,8 +475,69 @@ public final class QEMUVirtualMachine: ObservableObject {
         guestAgent = connection
         guestAgentServer = server
         guestAgentInfo.attach(connection)
+        connectToSharedFolders(connection)
         connection.start()
         server.start()
+    }
+
+    // MARK: - Shared Folders
+
+    /// Shared folders can't be added while the virtual machine runs, so Windows is only told about them when it starts.
+    /// If anything goes wrong, the virtual machine starts without them.
+    private func prepareFolderSharing(in runtimeDirectoryURL: URL) -> WindowsFolderSharing? {
+        do {
+            folderSharing = try WindowsFolderSharing.prepare(for: model, in: runtimeDirectoryURL)
+        } catch {
+            logger.error("Couldn't share folders: \(error, privacy: .public)")
+            folderSharing = nil
+        }
+
+        if folderSharing == nil, model.configuration.hasSharedFolders {
+            logger.notice("Not sharing folders, because they're disabled, unavailable, or Samba isn't installed")
+        }
+
+        sharedFoldersPolicyObservation = VirtualBuddyManagedPreferences.schema.reader()
+            .observeChanges(for: .disableSharedFolders) { [weak self] in
+                self?.enforceSharedFoldersPolicy()
+            }
+
+        return folderSharing
+    }
+
+    /// The agent forgets about the shared folders when it starts afresh, so it's told about them each time it says hello.
+    /// It's told when nothing is shared too, so that Windows disconnects from folders that were shared before.
+    private func connectToSharedFolders(_ connection: GuestAgentConnection) {
+        let folders = folderSharing?.sharedFolders ?? WindowsFolderSharing.nothingShared
+        let logger = logger
+
+        sharedFoldersObservation = connection.infoSubject
+            .compactMap { $0 }
+            .sink { [weak connection] _ in
+                guard let connection, connection.supportsSharedFolders else { return }
+
+                do {
+                    try connection.shareFolders(folders)
+                } catch {
+                    logger.error("Couldn't tell the agent about the shared folders: \(error, privacy: .public)")
+                }
+            }
+    }
+
+    private func enforceSharedFoldersPolicy() {
+        guard VirtualBuddyManagedPreferences.sharedFoldersDisabled, let folderSharing else { return }
+
+        self.folderSharing = nil
+
+        do {
+            try folderSharing.stopSharing()
+            logger.notice("Host folder sharing disconnected by DisableSharedFolders")
+        } catch {
+            logger.error("Couldn't stop sharing folders: \(error, privacy: .public)")
+        }
+
+        if let guestAgent, guestAgent.supportsSharedFolders {
+            try? guestAgent.shareFolders(WindowsFolderSharing.nothingShared)
+        }
     }
 
     private func prepareBundle(toolchain: QEMUToolchain) async throws {
@@ -634,6 +702,9 @@ public final class QEMUVirtualMachine: ObservableObject {
     }
 
     private func tearDown() async {
+        sharedFoldersObservation = nil
+        sharedFoldersPolicyObservation = nil
+        folderSharing = nil
         guestAgentInfo.detach()
         guestAgentServer?.close()
         guestAgentServer = nil
