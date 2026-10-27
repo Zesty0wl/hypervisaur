@@ -44,9 +44,10 @@ public struct VMInstallationWizard: View {
         }
     }
 
-    private var effectiveMaxContentWidth: CGFloat {
+    private var effectiveMaxContentWidth: CGFloat? {
         switch viewModel.step {
-        case .configuration: VMConfigurationSheet.minWidth
+        /// The configuration lays out its pages side by side, so it uses all of the window's width.
+        case .configuration: nil
         default: Self.maxContentWidth
         }
     }

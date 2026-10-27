@@ -10,9 +10,14 @@ import VirtualCore
 
 public struct VMConfigurationSheet: View {
 
-    public static let minWidth: CGFloat = 520
+    public static let minWidth: CGFloat = 760
+    static let minHeight: CGFloat = 500
+    /// Wide rather than tall, so that it suits a Mac's screen without scrolling.
+    static let idealSize = CGSize(width: 880, height: 580)
 
     @EnvironmentObject private var viewModel: VMConfigurationViewModel
+
+    @Environment(VMTemplatesController.self) private var templatesController
     
     /// The VM configuration as it existed when the user opened the configuration UI.
     /// Can be used to reset aspects of the configuration to their previous values.
@@ -43,22 +48,37 @@ public struct VMConfigurationSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @Environment(\.containerPadding) private var containerPadding
-    @Environment(\.maxContentWidth) private var maxContentWidth
 
     private var isInstall: Bool { viewModel.context == .preInstall }
 
     public var body: some View {
-        ScrollView(.vertical) {
-            VMConfigurationView(initialConfiguration: initialConfiguration)
-                .environmentObject(viewModel)
-                .frame(maxWidth: isInstall ? maxContentWidth : nil)
-                .padding(containerPadding)
-                .frame(maxWidth: .infinity)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .virtualBuddyBottomBar { buttons }
-        .resizableSheet(minWidth: Self.minWidth, maxWidth: .infinity, minHeight: 500, maxHeight: .infinity)
+        VMConfigurationView(initialConfiguration: initialConfiguration)
+            .environmentObject(viewModel)
+            .modifier(InstallerCardModifier(isInstall: isInstall, padding: containerPadding))
+            .frame(idealWidth: Self.idealSize.width, maxWidth: .infinity, idealHeight: Self.idealSize.height, maxHeight: .infinity)
+            .virtualBuddyBottomBar { buttons }
+            .resizableSheet(minWidth: Self.minWidth, maxWidth: .infinity, minHeight: Self.minHeight, maxHeight: .infinity)
     }
+
+    /// In the installer, the configuration sits on a card over the installer's background, like its other steps.
+    /// In a sheet, it fills the sheet.
+    private struct InstallerCardModifier: ViewModifier {
+        var isInstall: Bool
+        var padding: CGFloat
+
+        func body(content: Content) -> some View {
+            if isInstall {
+                content
+                    .clipShape(RoundedRectangle(cornerRadius: ControlGroupMetrics.primaryGroupRadius, style: .continuous))
+                    .controlGroup()
+                    .padding(padding)
+            } else {
+                content
+            }
+        }
+    }
+
+    private var showsTemplatePicker: Bool { templatesController.hasTemplates(for: viewModel.config.systemType) }
 
     @ViewBuilder
     private var buttons: some View {
@@ -68,14 +88,26 @@ public struct VMConfigurationSheet: View {
             }
 
             HStack {
+                if showsTemplatePicker {
+                    VMConfigurationTemplatePicker(
+                        controller: templatesController,
+                        context: viewModel.context,
+                        configuration: $viewModel.config
+                    ) { _ in
+                        if let image = viewModel.config.hardware.storageDevices.first(where: { $0.isBootVolume })?.managedImage {
+                            viewModel.updateBootStorageDevice(with: image)
+                        }
+                    }
+                }
+
+                Spacer()
+
                 if showsCancelButton {
                     Button("Cancel") {
                         dismiss()
                     }
                     .keyboardShortcut(.cancelAction)
                 }
-                
-                Spacer()
                 
                 Button(viewModel.context == .preInstall ? "Continue" : "Done") {
                     validateAndSave()
@@ -125,7 +157,7 @@ public struct VMConfigurationSheet: View {
 
 #if DEBUG
 struct VMConfigurationSheet_Previews: PreviewProvider {
-    static var height: Double { 1200 }
+    static var height: Double { VMConfigurationSheet.idealSize.height }
 
     static var previews: some View {
         _Template(vm: .preview, context: .preInstall)
