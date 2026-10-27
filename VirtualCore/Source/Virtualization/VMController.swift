@@ -275,6 +275,11 @@ public final class VMController: ObservableObject {
                 guard let self else { return }
                 self.guestAgentInfo = info
 
+                /// Saved with the rest of the model, for the library to show once the virtual machine is off.
+                if let info, self.virtualMachineModel.metadata.lastKnownSystem != info.system {
+                    self.virtualMachineModel.metadata.lastKnownSystem = info.system
+                }
+
                 if info == nil {
                     self.guestDisplayModes = nil
                 } else {

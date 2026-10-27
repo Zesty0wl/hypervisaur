@@ -36,6 +36,10 @@ public struct VBVirtualMachine: Identifiable, VBStorageDeviceContainer {
         /// The original local file URL that was specified (or set after a successful download from ``remoteInstallImageURL``).
         public private(set) var installImageURL: URL? = nil
 
+        /// The system the Hypervisaur agent most recently reported, such as "Windows 11 Pro 10.0.26300 ARM64",
+        /// so that the library can show it while the virtual machine is off.
+        public var lastKnownSystem: String? = nil
+
         /**
          Usage of the same property for both local and remote restore image URLs has been the source of recurring bugs in the past.
          Example: https://github.com/insidegui/VirtualBuddy/pull/395

@@ -28,10 +28,12 @@ public struct VMResourceUsage: Hashable, Sendable {
     public var processorHistory: [Double]
     /// The Mac's memory that the virtual machine is using, in bytes.
     public var memory: UInt64
+    /// How many bytes a second the virtual machine read from and wrote to disk since the previous sample.
+    public var disk: Double
 }
 
-/// Keeps track of what each virtual machine in the library is doing and, while it runs, how much processor time and memory
-/// it uses, for as long as something is showing it.
+/// Keeps track of what each virtual machine in the library is doing and, while it runs, how much processor time, memory
+/// and disk activity it uses, for as long as something is showing it.
 @MainActor
 public final class VMActivityMonitor: ObservableObject {
     @Published public private(set) var statuses = [VBVirtualMachine.ID: VMActivityStatus]()
@@ -158,6 +160,7 @@ private actor VMActivitySampler {
     private struct Previous {
         var pid: pid_t
         var processorTime: Duration
+        var diskBytes: UInt64
         var date: ContinuousClock.Instant
         var history: [Double]
     }
@@ -190,6 +193,7 @@ private actor VMActivitySampler {
 
             let now = ContinuousClock.now
             var history = previous[machine.id]?.history ?? []
+            var disk: Double = 0
 
             if let last = previous[machine.id], last.pid == pid {
                 let elapsed = (now - last.date) / .seconds(1)
@@ -197,13 +201,17 @@ private actor VMActivitySampler {
                 let share = elapsed > 0 ? used / (elapsed * Double(max(machine.processorCount, 1))) : 0
                 history.append(min(max(share, 0), 1))
                 history.removeFirst(max(history.count - historyLength, 0))
+
+                if elapsed > 0, sample.diskBytes >= last.diskBytes {
+                    disk = Double(sample.diskBytes - last.diskBytes) / elapsed
+                }
             }
 
-            previous[machine.id] = Previous(pid: pid, processorTime: sample.processorTime, date: now, history: history)
+            previous[machine.id] = Previous(pid: pid, processorTime: sample.processorTime, diskBytes: sample.diskBytes, date: now, history: history)
 
-            /// The share of the processors needs two samples, so it isn't reported until the second one.
+            /// Rates need two samples, so they aren't reported until the second one.
             guard let current = history.last else { continue }
-            usage[machine.id] = VMResourceUsage(processor: current, processorHistory: history, memory: sample.memoryFootprint)
+            usage[machine.id] = VMResourceUsage(processor: current, processorHistory: history, memory: sample.memoryFootprint, disk: disk)
         }
 
         var storage = [VBVirtualMachine.ID: UInt64]()

@@ -12,6 +12,8 @@ enum VMProcessInspector {
         var processorTime: Duration
         /// Memory used, as Activity Monitor shows it.
         var memoryFootprint: UInt64
+        /// Bytes read from and written to disk since the process started.
+        var diskBytes: UInt64
     }
 
     private static let virtualizationServiceName = "com.apple.Virtualization.VirtualMachine"
@@ -64,7 +66,11 @@ enum VMProcessInspector {
 
         let ticks = info.ri_user_time + info.ri_system_time
         let nanoseconds = ticks * UInt64(timebase.numer) / UInt64(timebase.denom)
-        return Sample(processorTime: .nanoseconds(Int64(clamping: nanoseconds)), memoryFootprint: info.ri_phys_footprint)
+        return Sample(
+            processorTime: .nanoseconds(Int64(clamping: nanoseconds)),
+            memoryFootprint: info.ri_phys_footprint,
+            diskBytes: info.ri_diskio_bytesread &+ info.ri_diskio_byteswritten
+        )
     }
 
     /// Processor times are counted in ticks of the system clock, which aren't nanoseconds on Apple silicon.
