@@ -12,6 +12,16 @@ https://github.com/user-attachments/assets/035a9ff6-a47a-486c-ae10-5fce98ac1a42
 
 ## Highlights
 
+### Your virtual machines in a rack
+
+The library shows each virtual machine as a unit in an equipment rack. Its lights show whether it's powered on, whether its agent is connected and when it's using its disk, a small screen shows what's on its display, and a backlit display shows its name, its system and what it's doing. Meters show how much of its processors and memory it's using, and the top of the rack shows how much of the Mac's memory they're using between them. Click a unit to start it, hold its power button to shut it down, or start it without a window from its menu.
+
+<p align="center">
+  <img src="./assets/Screenshots/Library.png" width="800" alt="The Hypervisaur library, showing six virtual machines as units in a rack, each with power, agent and disk lights, a small screen, a backlit display with its name and system, its processors, memory, disk and network, and meters for processor and memory use">
+</p>
+
+<p align="center"><sub>Starting three virtual machines from the rack. <a href="./assets/Video/Rack.mp4">Watch the video</a></sub></p>
+
 ### Windows 11 in a few clicks
 
 Hypervisaur checks for everything Windows needs and installs what's missing with Homebrew in one click. Then choose Microsoft's Windows 11 disc image, and with **Set Up Windows Automatically**, Windows installs without asking anything and signs in to a local account by itself. See [Windows virtual machines](#windows-virtual-machines).
@@ -78,7 +88,7 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for ru
 ## Features
 
 <p align="center">
-  <img src="./assets/Screenshots/Library.png" width="720" alt="The Hypervisaur library window, showing running virtual machines with their processor and memory use, and others that are powered off">
+  <img src="./assets/Screenshots/Configuration.png" width="640" alt="A virtual machine's settings, with General, Storage, Display, Network and Sharing listed down the left, each with a summary, and the processors, memory and sound settings on the right">
 </p>
 
 - **macOS virtual machines** on macOS 12 or later, using Apple's Virtualization framework, with the macOS versions available to download kept up to date from this repository
@@ -90,7 +100,8 @@ Hypervisaur adds Windows 11 virtual machines, running with QEMU, an agent for ru
 - A Storage window that shows what each virtual machine takes up, what deleting it would free, and which ones were copied from which
 - A shell in any running virtual machine, commands run from the Mac, and its logs as they're logged
 - Drag and drop of files and folders between the Mac and macOS, Windows and Linux virtual machines, with progress and speed
-- A library that shows which virtual machines are running, a live picture of what's on their screens, how much processor time and memory each one is using, and the space each one takes up on disk
+- A library that shows each virtual machine as a unit in a rack, with lights for its power, agent and disk, a live picture of its screen, a backlit display with its name and system, meters for its processor and memory use, and the space it takes up on disk
+- Settings for each virtual machine on one screen, with every section and a summary of it listed down the side
 - Virtual machines that keep running in the background after you close their window, optionally keeping them and the Mac awake
 - Windows that open at the size of the virtual machine's display, and keep its shape as you resize them
 - A resolution menu in the window's toolbar for macOS, Linux and Windows virtual machines, and starting any virtual machine full screen in a space of its own
@@ -222,11 +233,11 @@ To start a virtual machine full screen, in a space of its own, right-click it in
 
 ## Running in the background
 
-Close a running virtual machine's window and choose **Keep Running** to leave it running without its window, or choose Guest › Run in Background (⇧⌘W). The library shows it as running in the background; click it to open its window again, or use its menu in the library to save it, shut it down or keep it awake. In Settings, you can make keeping it running what closing a window always does.
+Close a running virtual machine's window and choose **Keep Running** to leave it running without its window, or choose Guest › Run in Background (⇧⌘W). To start one without opening its window at all, choose **Start Without Window** from its menu in the library. The library shows "No Window" on its display; click it to open its window again, or use its menu in the library to save it, shut it down or keep it awake. In Settings, you can make keeping it running what closing a window always does.
 
 With **Prevent sleep**, Hypervisaur keeps the Mac from going to sleep while a virtual machine runs in the background, and has the agent keep the virtual machine awake too: with `caffeinate` in macOS, `systemd-inhibit` in Linux and `SetThreadExecutionState` in Windows. The Mac's display can still turn off.
 
-While the library is on screen, each running virtual machine shows a lightly blurred picture of its screen, updated every 30 seconds. Pictures of macOS and Linux virtual machines come from their window and need permission to record the screen, so they stay as they were while the window is closed. Pictures of Windows virtual machines are always up to date.
+While the library is on screen, each running virtual machine shows a picture of its screen, updated every 30 seconds. Pictures of macOS and Linux virtual machines come from their window and need permission to record the screen, so they stay as they were while the window is closed, and there isn't one until the window has been opened. Pictures of Windows virtual machines are always up to date.
 
 ## Clones
 
