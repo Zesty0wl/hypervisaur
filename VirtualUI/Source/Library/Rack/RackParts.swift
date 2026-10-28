@@ -98,6 +98,20 @@ struct RackLight: View {
     }
 }
 
+extension RackLight.Signal {
+    /// Below this, a disk light stays off, so that the occasional log write doesn't make it flicker.
+    static let diskActivityThreshold: Double = 64 * 1024
+    /// At this rate and above, a disk light flickers as much as it can.
+    static let busyDiskRate: Double = 200 * 1024 * 1024
+
+    /// A disk light, which flickers more the more is read and written each second.
+    static func disk(bytesPerSecond rate: Double?) -> Self {
+        guard let rate, rate >= diskActivityThreshold else { return .off }
+        let intensity = log10(rate / diskActivityThreshold) / log10(busyDiskRate / diskActivityThreshold)
+        return .flicker(RackPalette.amber, intensity: intensity)
+    }
+}
+
 /// A light with its legend underneath, as printed on the front of a unit.
 struct RackLabeledLight: View {
     var legend: String
@@ -122,6 +136,9 @@ struct RackMeter: View {
     /// How much of the meter is lit, from 0 to 1, or `nil` when there's nothing to measure.
     var fraction: Double?
     var segments: Int
+    var segmentHeight: CGFloat = 12
+    /// Shows a chevron after the reading, for a meter that opens something when clicked.
+    var showsDisclosure = false
 
     private static let warningSegments = 3
 
@@ -137,6 +154,11 @@ struct RackMeter: View {
                 Spacer(minLength: 4)
                 Text(reading)
                     .foregroundStyle(fraction == nil ? RackPalette.secondaryInk : RackPalette.ink)
+
+                if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 7, weight: .bold))
+                }
             }
             .font(RackPalette.labelFont)
             .textCase(.uppercase)
@@ -159,7 +181,20 @@ struct RackMeter: View {
         return RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(isLit ? color : RackPalette.lampOff)
             .shadow(color: isLit ? color.opacity(0.55) : .clear, radius: 2)
-            .frame(width: 6, height: 12)
+            .frame(width: 6, height: segmentHeight)
+    }
+}
+
+/// The brushed front of a unit, lit from above.
+struct RackFaceplate: View {
+    var body: some View {
+        LinearGradient(colors: [RackPalette.unitTop, RackPalette.unitBottom], startPoint: .top, endPoint: .bottom)
+            .overlay(alignment: .top) {
+                Rectangle().fill(.white.opacity(0.07)).frame(height: 1)
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(.black.opacity(0.4)).frame(height: 1)
+            }
     }
 }
 
@@ -300,6 +335,88 @@ struct RackPowerButton: View {
         withAnimation(.easeOut(duration: 0.2)) { holdProgress = 0 }
 
         if inside, !didShutDown { primaryAction() }
+    }
+}
+
+/// A square key on the front of a unit, with its legend printed underneath.
+struct RackKeyButtonStyle: ButtonStyle {
+    var legend: String
+
+    func makeBody(configuration: Configuration) -> some View {
+        RackKey(label: configuration.label, legend: legend, isPressed: configuration.isPressed)
+    }
+}
+
+private struct RackKey<Label: View>: View {
+    var label: Label
+    var legend: String
+    var isPressed: Bool
+
+    @Environment(\.isEnabled)
+    private var isEnabled
+
+    @State private var isHovered = false
+
+    private static var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 4, style: .continuous) }
+
+    var body: some View {
+        VStack(spacing: 5) {
+            label
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isHovered && isEnabled ? RackPalette.teal : RackPalette.ink)
+                .frame(width: 40, height: 28)
+                .background { keycap }
+                .offset(y: isPressed ? 1 : 0)
+
+            Text(legend)
+                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(RackPalette.secondaryInk)
+        }
+        .opacity(isEnabled ? 1 : 0.5)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .animation(.snappy(duration: 0.12), value: isPressed)
+        .animation(.snappy, value: isHovered)
+    }
+
+    /// A keycap that sits proud of the panel, and sinks into it while it's pressed.
+    private var keycap: some View {
+        Self.shape
+            .fill(LinearGradient(
+                colors: isPressed ? [Color(white: 0.13), Color(white: 0.09)] : [Color(white: 0.25), Color(white: 0.13)],
+                startPoint: .top,
+                endPoint: .bottom
+            ))
+            .overlay(alignment: .top) {
+                /// The light catching the top edge of the cap.
+                Self.shape
+                    .strokeBorder(LinearGradient(colors: [.white.opacity(isPressed ? 0.04 : 0.16), .clear], startPoint: .top, endPoint: .center), lineWidth: 1)
+            }
+            .overlay { Self.shape.strokeBorder(.black.opacity(0.5), lineWidth: 0.5) }
+            .shadow(color: .black.opacity(0.6), radius: isPressed ? 0.5 : 1.5, y: isPressed ? 0 : 1.5)
+    }
+}
+
+/// A part of a unit's front that does something when it's clicked: it brightens while the pointer is over it and dims
+/// while it's pressed.
+struct RackPanelButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        RackPanelButton(label: configuration.label, isPressed: configuration.isPressed)
+    }
+}
+
+private struct RackPanelButton<Label: View>: View {
+    var label: Label
+    var isPressed: Bool
+
+    @State private var isHovered = false
+
+    var body: some View {
+        label
+            .brightness(isPressed ? -0.04 : isHovered ? 0.06 : 0)
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+            .animation(.snappy(duration: 0.15), value: isHovered)
     }
 }
 

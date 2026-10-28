@@ -154,7 +154,7 @@ struct LibraryItemView: View {
             RackEar()
         }
         .frame(height: Self.height)
-        .background { faceplate }
+        .background { RackFaceplate() }
         .overlay {
             if isHighlighted {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
@@ -178,16 +178,6 @@ struct LibraryItemView: View {
         .animation(isPressed ? .linear(duration: 0) : .snappy, value: isPressed)
         .animation(.snappy, value: isHovered)
         .animation(.snappy, value: isHighlighted)
-    }
-
-    private var faceplate: some View {
-        LinearGradient(colors: [RackPalette.unitTop, RackPalette.unitBottom], startPoint: .top, endPoint: .bottom)
-            .overlay(alignment: .top) {
-                Rectangle().fill(.white.opacity(0.07)).frame(height: 1)
-            }
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(.black.opacity(0.4)).frame(height: 1)
-            }
     }
 
     // MARK: Lights
@@ -242,19 +232,10 @@ struct LibraryItemView: View {
         }
     }
 
-    /// Below this, the disk light stays off, so that the occasional log write doesn't make it flicker.
-    private static let diskActivityThreshold: Double = 64 * 1024
-    /// At this rate and above, the disk light flickers as much as it can.
-    private static let busyDiskRate: Double = 200 * 1024 * 1024
-
-    private var diskSignal: RackLight.Signal {
-        guard let usage, usage.disk >= Self.diskActivityThreshold else { return .off }
-        let intensity = log10(usage.disk / Self.diskActivityThreshold) / log10(Self.busyDiskRate / Self.diskActivityThreshold)
-        return .flicker(RackPalette.amber, intensity: intensity)
-    }
+    private var diskSignal: RackLight.Signal { .disk(bytesPerSecond: usage?.disk) }
 
     private var diskHelp: String {
-        guard let usage, usage.disk >= Self.diskActivityThreshold else {
+        guard let usage, usage.disk >= RackLight.Signal.diskActivityThreshold else {
             return "Flickers while the virtual machine reads from or writes to disk."
         }
         return "Reading and writing \(Int64(usage.disk).formatted(.byteCount(style: .file))) a second."

@@ -14,10 +14,10 @@ https://github.com/user-attachments/assets/23ddd942-8b0a-49a5-a74b-4f0ab5acbc0f
 
 ### Your virtual machines in a rack
 
-The library shows each virtual machine as a unit in an equipment rack. Its lights show whether it's powered on, whether its agent is connected and when it's using its disk, a small screen shows what's on its display, and a backlit display shows its name, its system and what it's doing. Meters show how much of its processors and memory it's using, and the top of the rack shows how much of the Mac's memory they're using between them. Click a unit to start it, hold its power button to shut it down, or start it without a window from its menu.
+The library shows each virtual machine as a unit in an equipment rack. Its lights show whether it's powered on, whether its agent is connected and when it's using its disk, a small screen shows what's on its display, and a backlit display shows its name, its system and what it's doing. Meters show how much of its processors and memory it's using. The controller at the top of the rack shows how many units are running, how much of the Mac's memory they're using between them and how much space is left on the library's volume, with a DISK key that opens the Storage window and a NEW key for a new virtual machine. Click a unit to start it, hold its power button to shut it down, or start it without a window from its menu. The blanking plate below the last unit starts a new virtual machine too, as does File › New Virtual Machine (⌘N).
 
 <p align="center">
-  <img src="./assets/Screenshots/Library.png" width="800" alt="The Hypervisaur library, showing six virtual machines as units in a rack, each with power, agent and disk lights, a small screen, a backlit display with its name and system, its processors, memory, disk and network, and meters for processor and memory use">
+  <img src="./assets/Screenshots/Library.png" width="800" alt="The Hypervisaur library, showing a controller unit with memory and storage meters and DISK and NEW keys, six virtual machines as units in a rack below it, each with power, agent and disk lights, a small screen, a backlit display with its name and system, its processors, memory, disk and network, and meters for processor and memory use, and a blanking plate for installing a new unit">
 </p>
 
 <p align="center"><sub>Starting three virtual machines from the rack. <a href="./assets/Video/Rack.mp4">Watch the video</a></sub></p>
@@ -256,7 +256,7 @@ Things the operating system in a clone keeps from the original:
 
 ## Storage
 
-Window › Storage, or the drive button in the library's toolbar, shows how virtual machines use the space on the library's volume:
+Window › Storage (⌥⌘0), or the DISK key or storage meter on the rack's controller, shows how virtual machines use the space on the library's volume:
 
 - A bar for the whole volume: virtual machines, downloads, virtual machines in the Trash, other files, space macOS can free when it needs to, and what's available.
 - Each virtual machine, under the one it was cloned or duplicated from, with what it takes up and what deleting it would free. A clone shares its storage with the virtual machine it came from until either of them changes, so deleting one of them only frees what's changed in it. What they share is freed once both are deleted.

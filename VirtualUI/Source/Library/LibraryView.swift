@@ -29,9 +29,6 @@ public struct LibraryView: View {
     @EnvironmentObject private var library: VMLibraryController
     @EnvironmentObject private var sessionManager: VirtualMachineSessionUIManager
 
-    @Environment(\.openCocoaWindow)
-    private var openCocoaWindow
-
     @Environment(\.openVirtualBuddySettings)
     private var openSettings
 
@@ -57,7 +54,6 @@ public struct LibraryView: View {
     public var body: some View {
         libraryContents
             .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
-            .toolbar(content: { toolbarContents })
             /// The rack looks the same in light and dark mode, like hardware does, so the window around it stays dark.
             .windowAppearance(.darkAqua)
             .task {
@@ -67,27 +63,6 @@ public struct LibraryView: View {
                 }
                 #endif
             }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbarContents: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button {
-                StorageWindow.open(library: library)
-            } label: {
-                Image(systemName: "internaldrive")
-            }
-            .help("Storage")
-
-            Button {
-                openCocoaWindow {
-                    VMInstallationWizard(library: library)
-                }
-            } label: {
-                Image(systemName: "plus")
-            }
-            .help("New virtual machine")
-        }
     }
 
     private static let unitSpacing: CGFloat = 4
@@ -136,7 +111,12 @@ public struct LibraryView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 LazyVStack(spacing: Self.unitSpacing) {
-                    RackHeader(machines: machines, monitor: library.activityMonitor)
+                    RackController(
+                        machines: machines,
+                        monitor: library.activityMonitor,
+                        showStorage: { StorageWindow.open(library: library) },
+                        addMachine: { sessionManager.launchInstallWizard(library: library) }
+                    )
 
                     ForEach(machines) { vm in
                         Button {
@@ -148,6 +128,10 @@ public struct LibraryView: View {
                         .environmentObject(library)
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .id(vm.id)
+                    }
+
+                    RackBlankingPlate {
+                        sessionManager.launchInstallWizard(library: library)
                     }
                 }
                 .padding(Self.rackPadding)

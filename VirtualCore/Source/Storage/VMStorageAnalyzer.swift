@@ -269,24 +269,6 @@ public struct VMStorageAnalyzer: Sendable {
     }
 
     private func measureVolume() -> VMStorageReport.Volume? {
-        let keys: Set<URLResourceKey> = [
-            .volumeLocalizedNameKey,
-            .volumeTotalCapacityKey,
-            .volumeAvailableCapacityKey,
-            .volumeAvailableCapacityForImportantUsageKey,
-            .volumeSupportsFileCloningKey,
-        ]
-
-        guard let values = try? libraryURL.resourceValues(forKeys: keys), let capacity = values.volumeTotalCapacity else { return nil }
-
-        let available = UInt64(max(values.volumeAvailableCapacity ?? 0, 0))
-
-        return VMStorageReport.Volume(
-            name: values.volumeLocalizedName ?? libraryURL.lastPathComponent,
-            capacity: UInt64(max(capacity, 0)),
-            availableCapacity: available,
-            availableCapacityForImportantUsage: values.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) } ?? available,
-            supportsCloning: values.volumeSupportsFileCloning ?? false
-        )
+        VMStorageReport.Volume(containing: libraryURL)
     }
 }

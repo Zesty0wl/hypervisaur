@@ -56,6 +56,11 @@ struct VirtualBuddyApp: App {
             }
 
             CommandGroup(after: .newItem) {
+                Button("New Virtual Machine…") {
+                    sessionManager.launchInstallWizard(library: library)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+
                 Button("Import Virtual Machine…") {
                     sessionManager.launchImportVirtualMachinePanel(library: library)
                 }

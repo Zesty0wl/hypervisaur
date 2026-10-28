@@ -40,6 +40,8 @@ public final class VMActivityMonitor: ObservableObject {
     @Published public private(set) var usage = [VBVirtualMachine.ID: VMResourceUsage]()
     /// The space each virtual machine's files take up on disk, in bytes.
     @Published public private(set) var storage = [VBVirtualMachine.ID: UInt64]()
+    /// The volume the library is on, measured as often as ``storage``.
+    @Published public private(set) var libraryVolume: VMStorageReport.Volume?
 
     public static let sampleInterval = Duration.seconds(2)
     /// How many samples ``VMResourceUsage/processorHistory`` keeps.
@@ -132,7 +134,7 @@ public final class VMActivityMonitor: ObservableObject {
             || library.virtualMachines.contains { storage[$0.id] == nil }
         let storageBundles = measuresStorage ? library.virtualMachines.map { ($0.id, $0.bundleURL) } : []
 
-        let result = await sampler.sample(running, storageOf: storageBundles)
+        let result = await sampler.sample(running, storageOf: storageBundles, volumeContaining: measuresStorage ? library.libraryURL : nil)
 
         guard !Task.isCancelled else { return }
 
@@ -140,6 +142,7 @@ public final class VMActivityMonitor: ObservableObject {
         if measuresStorage {
             lastStorageUpdate = now
             if result.storage != storage { storage = result.storage }
+            if result.volume != libraryVolume { libraryVolume = result.volume }
         }
     }
 }
@@ -155,6 +158,7 @@ private actor VMActivitySampler {
     struct Result: Sendable {
         var usage: [VBVirtualMachine.ID: VMResourceUsage]
         var storage: [VBVirtualMachine.ID: UInt64]
+        var volume: VMStorageReport.Volume?
     }
 
     private struct Previous {
@@ -172,7 +176,7 @@ private actor VMActivitySampler {
         self.historyLength = historyLength
     }
 
-    func sample(_ machines: [Machine], storageOf bundles: [(VBVirtualMachine.ID, URL)]) -> Result {
+    func sample(_ machines: [Machine], storageOf bundles: [(VBVirtualMachine.ID, URL)], volumeContaining volumeURL: URL?) -> Result {
         previous = previous.filter { id, _ in machines.contains { $0.id == id } }
 
         var candidates: [pid_t]?
@@ -219,7 +223,7 @@ private actor VMActivitySampler {
             storage[id] = Self.allocatedSize(of: bundleURL)
         }
 
-        return Result(usage: usage, storage: storage)
+        return Result(usage: usage, storage: storage, volume: volumeURL.flatMap(VMStorageReport.Volume.init(containing:)))
     }
 
     /// The space the bundle's files take up, which is less than their size for disk images with empty space in them.

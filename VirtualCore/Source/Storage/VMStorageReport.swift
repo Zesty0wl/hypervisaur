@@ -29,6 +29,29 @@ public struct VMStorageReport: Hashable, Sendable {
             self.availableCapacityForImportantUsage = availableCapacityForImportantUsage
             self.supportsCloning = supportsCloning
         }
+
+        /// Measures the volume that the file or folder is on, or `nil` when it can't be measured, such as when it doesn't exist.
+        public init?(containing url: URL) {
+            let keys: Set<URLResourceKey> = [
+                .volumeLocalizedNameKey,
+                .volumeTotalCapacityKey,
+                .volumeAvailableCapacityKey,
+                .volumeAvailableCapacityForImportantUsageKey,
+                .volumeSupportsFileCloningKey,
+            ]
+
+            guard let values = try? url.resourceValues(forKeys: keys), let capacity = values.volumeTotalCapacity else { return nil }
+
+            let available = UInt64(max(values.volumeAvailableCapacity ?? 0, 0))
+
+            self.init(
+                name: values.volumeLocalizedName ?? url.lastPathComponent,
+                capacity: UInt64(max(capacity, 0)),
+                availableCapacity: available,
+                availableCapacityForImportantUsage: values.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) } ?? available,
+                supportsCloning: values.volumeSupportsFileCloning ?? false
+            )
+        }
     }
 
     /// What a file in a virtual machine is for.
