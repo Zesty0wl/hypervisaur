@@ -81,7 +81,7 @@ struct LibraryItemView: View {
 
     @EnvironmentObject var library: VMLibraryController
     @EnvironmentObject var sessionManager: VirtualMachineSessionUIManager
-    @ObservedObject var monitor: VMActivityMonitor
+    @ObservedObject var activity: VMActivity
 
     var vm: VBVirtualMachine
     @State var name: String
@@ -111,9 +111,9 @@ struct LibraryItemView: View {
 
     private var isHighlighted: Bool { library.recentlyDuplicatedMachineIdentifier == vm.id }
 
-    private var status: VMActivityStatus { monitor.statuses[vm.id] ?? .poweredOff }
+    private var status: VMActivityStatus { activity.status }
 
-    private var usage: VMResourceUsage? { status.isRunning ? monitor.usage[vm.id] : nil }
+    private var usage: VMResourceUsage? { activity.usage }
 
     private var hardware: VBMacDevice { vm.configuration.hardware }
 
@@ -162,8 +162,7 @@ struct LibraryItemView: View {
                     .shadow(color: RackPalette.teal.opacity(0.6), radius: 6)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+        .rackUnitShape()
         .brightness(isHovered ? 0.03 : 0)
         .scaleEffect(isPressed ? 0.995 : 1)
         .onHover { isHovered = $0 }
@@ -334,7 +333,7 @@ struct LibraryItemView: View {
             plateCell("MEM", hardware.memorySize.formatted(.byteCount(style: .memory)))
                 .help("\(hardware.memorySize.formatted(.byteCount(style: .memory))) of memory assigned.")
             plateDivider
-            plateCell("DISK", monitor.storage[vm.id].map { $0.formatted(.byteCount(style: .file)) } ?? "–")
+            plateCell("DISK", activity.storage.map { $0.formatted(.byteCount(style: .file)) } ?? "–")
                 .help("The space this virtual machine’s files take up on disk.")
             plateDivider
             plateCell("NET", networkLegend)

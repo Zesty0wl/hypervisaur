@@ -1,5 +1,10 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Whether the rack's lights and displays move. They're still while nobody can see them.
+    @Entry var rackIsAnimated = true
+}
+
 /// The colors of the library's equipment rack, which looks the same in light and dark mode, the way hardware does.
 enum RackPalette {
     static let caseBackground = Color(red: 0.090, green: 0.110, blue: 0.114)
@@ -40,42 +45,14 @@ struct RackLight: View {
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
-    var body: some View {
-        switch signal {
-        case .off:
-            lamp(nil)
-        case .steady(let color):
-            lamp(color)
-        case .pulse(let color) where reduceMotion, .blink(let color) where reduceMotion, .flicker(let color, _) where reduceMotion:
-            lamp(color)
-        case .pulse(let color):
-            TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
-                lamp(color, brightness: 0.2 + 0.8 * (0.5 + 0.5 * cos(phase * 2 * .pi)))
-            }
-        case .blink(let color):
-            TimelineView(.periodic(from: .distantPast, by: 0.45)) { context in
-                let tick = Int(context.date.timeIntervalSinceReferenceDate / 0.45)
-                lamp(color, brightness: tick.isMultiple(of: 2) ? 1 : 0.15)
-            }
-        case .flicker(let color, let intensity):
-            TimelineView(.periodic(from: .distantPast, by: 0.08)) { context in
-                let tick = Int(context.date.timeIntervalSinceReferenceDate / 0.08)
-                lamp(color, brightness: Self.isLit(tick: tick, seed: seed, intensity: intensity) ? 1 : 0.12)
-            }
-        }
-    }
+    @Environment(\.rackIsAnimated)
+    private var isAnimated
 
-    private func lamp(_ color: Color?, brightness: Double = 1) -> some View {
+    var body: some View {
         ZStack {
             Circle().fill(RackPalette.lampOff)
 
-            if let color {
-                Circle()
-                    .fill(color)
-                    .shadow(color: color.opacity(0.9), radius: 3)
-                    .opacity(brightness)
-            }
+            light
 
             /// The reflection on the lens.
             Circle()
@@ -83,18 +60,26 @@ struct RackLight: View {
                 .frame(width: 2.5, height: 2.5)
                 .offset(x: -1.2, y: -1.2)
         }
-        .frame(width: 9, height: 9)
+        .frame(width: RackLamp.diameter, height: RackLamp.diameter)
         .overlay { Circle().strokeBorder(.black.opacity(0.4), lineWidth: 0.5) }
     }
 
-    /// Whether a flickering light is on for this tick. Busier lights are on for more of the ticks.
-    private static func isLit(tick: Int, seed: Int, intensity: Double) -> Bool {
-        var value = UInt64(bitPattern: Int64(tick &* 31 &+ seed))
-        value ^= value >> 33
-        value &*= 0xff51afd7ed558ccd
-        value ^= value >> 33
-        let dutyCycle = 0.25 + 0.6 * min(max(intensity, 0), 1)
-        return Double(value % 1000) / 1000 < dutyCycle
+    @ViewBuilder
+    private var light: some View {
+        let isMoving = isAnimated && !reduceMotion
+
+        switch signal {
+        case .off:
+            EmptyView()
+        case .steady(let color):
+            RackLamp(color: color)
+        case .pulse(let color):
+            RackLamp(color: color, motion: isMoving ? .pulse : nil)
+        case .blink(let color):
+            RackLamp(color: color, motion: isMoving ? .blink : nil)
+        case .flicker(let color, let intensity):
+            RackLamp(color: color, motion: isMoving ? .flicker(intensity: intensity, seed: seed) : nil)
+        }
     }
 }
 
@@ -166,22 +151,30 @@ struct RackMeter: View {
             .monospacedDigit()
             .lineLimit(1)
 
-            HStack(spacing: 2) {
-                ForEach(0..<segments, id: \.self) { index in
-                    segment(isLit: index < litSegments, isWarning: index >= segments - Self.warningSegments)
-                }
-            }
+            RackMeterSegments(
+                lit: litSegments,
+                count: segments,
+                warningCount: Self.warningSegments,
+                height: segmentHeight
+            )
         }
         .fixedSize()
-        .animation(.snappy, value: litSegments)
     }
+}
 
-    private func segment(isLit: Bool, isWarning: Bool) -> some View {
-        let color = isWarning ? RackPalette.amber : RackPalette.green
-        return RoundedRectangle(cornerRadius: 1, style: .continuous)
-            .fill(isLit ? color : RackPalette.lampOff)
-            .shadow(color: isLit ? color.opacity(0.55) : .clear, radius: 2)
-            .frame(width: 6, height: segmentHeight)
+extension View {
+    /// Shapes the view like a unit in the rack, with the shadow it casts on the rack behind it. The shadow comes from the
+    /// unit's shape rather than what's on it, so it doesn't have to be worked out again whenever a light or meter changes.
+    func rackUnitShape() -> some View {
+        let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
+
+        return clipShape(shape)
+            .background {
+                /// Half-transparent black behind the unit's edge is what the shadow from the unit itself would be there.
+                shape
+                    .fill(.black.opacity(0.5))
+                    .shadow(color: .black, radius: 2, y: 1)
+            }
     }
 }
 

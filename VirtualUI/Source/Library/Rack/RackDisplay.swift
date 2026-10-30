@@ -110,76 +110,18 @@ struct LCDLine: View {
     @Environment(\.accessibilityReduceMotion)
     private var reduceMotion
 
-    @State private var scrollStart = Date.now
-
-    /// How long each character stays in place while a line scrolls.
-    private static let scrollInterval: TimeInterval = 0.3
-    /// How many steps the start of the text stays in place before it scrolls again.
-    private static let pauseSteps = 7
-    /// The blank cells between the end of the text and its start coming round again.
-    private static let gapCells = 3
+    @Environment(\.rackIsAnimated)
+    private var isAnimated
 
     var body: some View {
-        GeometryReader { geometry in
-            let columns = LCDMetrics.columns(fitting: geometry.size.width)
-            let characters = LCDFont.characters(in: text)
-
-            if characters.count <= columns {
-                cells(characters)
-            } else if reduceMotion {
-                cells(Array(characters.prefix(columns - 1)) + ["…"])
-            } else {
-                TimelineView(.periodic(from: scrollStart, by: Self.scrollInterval)) { context in
-                    cells(Self.window(of: characters, columns: columns, elapsed: context.date.timeIntervalSince(scrollStart)))
-                }
-            }
-        }
+        LCDLineRepresentable(
+            characters: LCDFont.characters(in: text),
+            isBacklit: isBacklit,
+            overflow: reduceMotion ? .truncate : isAnimated ? .scroll : .hold
+        )
         .frame(height: LCDMetrics.lineHeight)
-        .onChange(of: text) { scrollStart = .now }
         .accessibilityElement()
         .accessibilityLabel(text)
-    }
-
-    /// The characters showing a number of steps into scrolling the text, which comes round again after a gap.
-    private static func window(of characters: [Character], columns: Int, elapsed: TimeInterval) -> [Character] {
-        let loop = characters + Array(repeating: " ", count: gapCells)
-        let step = Int(max(elapsed, 0) / scrollInterval)
-        let offset = max(0, step % (pauseSteps + loop.count) - pauseSteps)
-        return (0..<columns).map { loop[(offset + $0) % loop.count] }
-    }
-
-    private func cells(_ characters: [Character]) -> some View {
-        Canvas { context, size in
-            let columns = LCDMetrics.columns(fitting: size.width)
-            var unlit = Path()
-            var lit = Path()
-
-            for column in 0..<columns {
-                let glyph = column < characters.count ? LCDFont.glyph(for: characters[column]) : LCDFont.blank
-                let originX = CGFloat(column) * LCDMetrics.advance
-
-                for row in 0..<LCDMetrics.glyphRows {
-                    for dot in 0..<LCDMetrics.glyphColumns {
-                        let rect = CGRect(
-                            x: originX + CGFloat(dot) * LCDMetrics.pitch,
-                            y: CGFloat(row) * LCDMetrics.pitch,
-                            width: LCDMetrics.dotSize,
-                            height: LCDMetrics.dotSize
-                        )
-                        if glyph[row] & (1 << (LCDMetrics.glyphColumns - 1 - dot)) != 0 {
-                            lit.addRect(rect)
-                        } else {
-                            unlit.addRect(rect)
-                        }
-                    }
-                }
-            }
-
-            context.fill(unlit, with: .color(LCDPalette.ink.opacity(0.045)))
-            /// Lit dots cast a faint shadow on the backlight behind them.
-            context.fill(lit.offsetBy(dx: 0.5, dy: 0.6), with: .color(LCDPalette.ink.opacity(isBacklit ? 0.18 : 0.1)))
-            context.fill(lit, with: .color(LCDPalette.ink.opacity(isBacklit ? 0.88 : 0.72)))
-        }
     }
 }
 

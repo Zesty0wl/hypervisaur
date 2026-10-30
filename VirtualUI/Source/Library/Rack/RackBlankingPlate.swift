@@ -55,8 +55,7 @@ private struct RackBlankingPlateFace: View {
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .strokeBorder(RackPalette.teal.opacity(isLit ? 0.55 : 0), lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+        .rackUnitShape()
         .scaleEffect(isPressed ? 0.995 : 1)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }

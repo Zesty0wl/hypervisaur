@@ -15,29 +15,38 @@ struct RackController: View {
     private static let meterSegments = 28
     private static let meterSegmentHeight: CGFloat = 9
 
-    private var poweredMachines: [VBVirtualMachine] {
-        machines.filter { monitor.statuses[$0.id]?.isRunning == true }
-    }
+    /// What the rack shows about its units, worked out once each time it changes.
+    private struct Totals {
+        var powered: Int
+        var memoryDrawn: UInt64
+        var diskRate: Double
+        /// How many units the rack holds and how many are powered, as the display says it.
+        var summary: String
 
-    private var memoryDrawn: UInt64 {
-        poweredMachines.reduce(0) { $0 + (monitor.usage[$1.id]?.memory ?? 0) }
-    }
+        @MainActor
+        init(machines: [VBVirtualMachine], monitor: VMActivityMonitor) {
+            let poweredMachines = machines.filter { monitor.statuses[$0.id]?.isRunning == true }
 
-    private var diskRate: Double {
-        poweredMachines.reduce(0) { $0 + (monitor.usage[$1.id]?.disk ?? 0) }
+            powered = poweredMachines.count
+            memoryDrawn = poweredMachines.reduce(0) { $0 + (monitor.usage[$1.id]?.memory ?? 0) }
+            diskRate = poweredMachines.reduce(0) { $0 + (monitor.usage[$1.id]?.disk ?? 0) }
+            summary = String(AttributedString(localized: "^[\(machines.count) unit](inflect: true) · \(powered) powered").characters)
+        }
     }
 
     var body: some View {
+        let totals = Totals(machines: machines, monitor: monitor)
+
         HStack(spacing: 0) {
             RackEar()
 
             HStack(spacing: 14) {
-                lights
+                lights(totals)
 
-                display
+                display(totals)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    memoryMeter
+                    memoryMeter(totals)
                     storageMeter
                 }
 
@@ -63,57 +72,52 @@ struct RackController: View {
         }
         .frame(height: LibraryItemView.height)
         .background { RackFaceplate() }
-        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+        .rackUnitShape()
     }
 
     // MARK: Lights
 
-    private var lights: some View {
+    private func lights(_ totals: Totals) -> some View {
         HStack(spacing: 2) {
             RackLabeledLight(legend: "PWR", signal: .steady(RackPalette.green))
                 .help("The rack has power while Hypervisaur is open.")
 
-            RackLabeledLight(legend: "RUN", signal: poweredMachines.isEmpty ? .off : .steady(RackPalette.green))
-                .help(poweredMachines.isEmpty
+            RackLabeledLight(legend: "RUN", signal: totals.powered == 0 ? .off : .steady(RackPalette.green))
+                .help(totals.powered == 0
                     ? Text("Lights up while any of the virtual machines is running.")
-                    : Text("^[\(poweredMachines.count) virtual machine](inflect: true) running."))
+                    : Text("^[\(totals.powered) virtual machine](inflect: true) running."))
 
-            RackLabeledLight(legend: "DSK", signal: .disk(bytesPerSecond: diskRate))
-                .help(diskRate >= RackLight.Signal.diskActivityThreshold
-                    ? "Running virtual machines are reading and writing \(Int64(diskRate).formatted(.byteCount(style: .file))) a second between them."
+            RackLabeledLight(legend: "DSK", signal: .disk(bytesPerSecond: totals.diskRate))
+                .help(totals.diskRate >= RackLight.Signal.diskActivityThreshold
+                    ? "Running virtual machines are reading and writing \(Int64(totals.diskRate).formatted(.byteCount(style: .file))) a second between them."
                     : "Flickers while running virtual machines read from or write to disk.")
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(unitSummary)
+        .accessibilityLabel(totals.summary)
     }
 
     // MARK: Display
 
-    private var unitSummary: String {
-        String(AttributedString(localized: "^[\(machines.count) unit](inflect: true) · \(poweredMachines.count) powered").characters)
-    }
-
     /// Like a unit's display, it's backlit while a virtual machine is running.
-    private var display: some View {
-        LCDPanel(isBacklit: !poweredMachines.isEmpty) {
+    private func display(_ totals: Totals) -> some View {
+        LCDPanel(isBacklit: totals.powered > 0) {
             VStack(alignment: .leading, spacing: LCDMetrics.lineSpacing) {
                 LCDLine(text: "HYPERVISAUR")
-                LCDLine(text: unitSummary.uppercased())
+                LCDLine(text: totals.summary.uppercased())
             }
         }
         .frame(minWidth: 150, maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(unitSummary)
+        .accessibilityLabel(totals.summary)
     }
 
     // MARK: Meters
 
-    private var memoryMeter: some View {
+    private func memoryMeter(_ totals: Totals) -> some View {
         RackMeter(
             title: "Memory drawn",
-            reading: "\(memoryDrawn.formatted(.byteCount(style: .memory, spellsOutZero: false))) of \(physicalMemory.formatted(.byteCount(style: .memory)))",
-            fraction: poweredMachines.isEmpty ? nil : Double(memoryDrawn) / Double(max(physicalMemory, 1)),
+            reading: "\(totals.memoryDrawn.formatted(.byteCount(style: .memory, spellsOutZero: false))) of \(physicalMemory.formatted(.byteCount(style: .memory)))",
+            fraction: totals.powered == 0 ? nil : Double(totals.memoryDrawn) / Double(max(physicalMemory, 1)),
             segments: Self.meterSegments,
             segmentHeight: Self.meterSegmentHeight
         )

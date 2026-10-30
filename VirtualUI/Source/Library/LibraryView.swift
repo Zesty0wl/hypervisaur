@@ -122,7 +122,7 @@ public struct LibraryView: View {
                         Button {
                             sessionManager.launchAndStart(vm, library: library)
                         } label: {
-                            LibraryItemView(monitor: library.activityMonitor, vm: vm, name: vm.name)
+                            LibraryItemView(activity: library.activityMonitor.activity(for: vm.id), vm: vm, name: vm.name)
                         }
                         .buttonStyle(.vbLibraryItem)
                         .environmentObject(library)
@@ -136,10 +136,15 @@ public struct LibraryView: View {
                 }
                 .padding(Self.rackPadding)
             }
-            /// Running virtual machines show what they're using while the library is open.
-            .task { await library.activityMonitor.observe() }
-            /// And what's on their display, while the library is on screen.
+            /// Running virtual machines show what they're using and what's on their display while the library is on screen.
+            /// Once it isn't, such as when a virtual machine's window covers it, measuring them and moving the lights would be
+            /// work for nobody.
             .onWindowVisibilityChange { isLibraryVisible = $0 }
+            .environment(\.rackIsAnimated, isLibraryVisible)
+            .task(id: isLibraryVisible) {
+                guard isLibraryVisible else { return }
+                await library.activityMonitor.observe()
+            }
             .task(id: isLibraryVisible) {
                 guard isLibraryVisible else { return }
 

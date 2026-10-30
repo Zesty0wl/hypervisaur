@@ -32,14 +32,33 @@ public struct VMResourceUsage: Hashable, Sendable {
     public var disk: Double
 }
 
+/// What one virtual machine is doing, for something that shows only that virtual machine. It changes only when that
+/// virtual machine's figures do, rather than whenever any in the library do.
+@MainActor
+public final class VMActivity: ObservableObject {
+    @Published public fileprivate(set) var status = VMActivityStatus.poweredOff
+    /// What the virtual machine is using, while it runs and once it has been measured.
+    @Published public fileprivate(set) var usage: VMResourceUsage?
+    /// The space the virtual machine's files take up on disk, in bytes, once it has been measured.
+    @Published public fileprivate(set) var storage: UInt64?
+
+    fileprivate init() {}
+}
+
 /// Keeps track of what each virtual machine in the library is doing and, while it runs, how much processor time, memory
 /// and disk activity it uses, for as long as something is showing it.
 @MainActor
 public final class VMActivityMonitor: ObservableObject {
-    @Published public private(set) var statuses = [VBVirtualMachine.ID: VMActivityStatus]()
-    @Published public private(set) var usage = [VBVirtualMachine.ID: VMResourceUsage]()
+    @Published public private(set) var statuses = [VBVirtualMachine.ID: VMActivityStatus]() {
+        didSet { updateActivities() }
+    }
+    @Published public private(set) var usage = [VBVirtualMachine.ID: VMResourceUsage]() {
+        didSet { updateActivities() }
+    }
     /// The space each virtual machine's files take up on disk, in bytes.
-    @Published public private(set) var storage = [VBVirtualMachine.ID: UInt64]()
+    @Published public private(set) var storage = [VBVirtualMachine.ID: UInt64]() {
+        didSet { updateActivities() }
+    }
     /// The volume the library is on, measured as often as ``storage``.
     @Published public private(set) var libraryVolume: VMStorageReport.Volume?
 
@@ -55,9 +74,37 @@ public final class VMActivityMonitor: ObservableObject {
     private var samplingTask: Task<Void, Never>?
     private var lastStorageUpdate: ContinuousClock.Instant?
     private var cancellables = Set<AnyCancellable>()
+    private var activities = [VBVirtualMachine.ID: VMActivity]()
 
     init(library: VMLibraryController) {
         self.library = library
+    }
+
+    /// What one virtual machine is doing, kept up to date along with the figures for the whole library.
+    public func activity(for id: VBVirtualMachine.ID) -> VMActivity {
+        if let activity = activities[id] { return activity }
+
+        let activity = VMActivity()
+        update(activity, for: id)
+        activities[id] = activity
+        return activity
+    }
+
+    private func updateActivities() {
+        for (id, activity) in activities {
+            update(activity, for: id)
+        }
+    }
+
+    private func update(_ activity: VMActivity, for id: VBVirtualMachine.ID) {
+        let status = statuses[id] ?? .poweredOff
+        let usage = status.isRunning ? usage[id] : nil
+        let storage = storage[id]
+
+        /// Setting a property publishes a change even when it's the same, which would update the views showing it.
+        if activity.status != status { activity.status = status }
+        if activity.usage != usage { activity.usage = usage }
+        if activity.storage != storage { activity.storage = storage }
     }
 
     /// Keeps the figures up to date until the calling task is cancelled.
@@ -102,6 +149,7 @@ public final class VMActivityMonitor: ObservableObject {
         for vm in library.virtualMachines {
             statuses[vm.id] = status(of: vm)
         }
+        activities = activities.filter { id, _ in statuses[id] != nil }
         if statuses != self.statuses { self.statuses = statuses }
     }
 
