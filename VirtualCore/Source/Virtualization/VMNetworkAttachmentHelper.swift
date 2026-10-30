@@ -123,7 +123,7 @@ final class VMNetworkAttachmentHelper {
         if virtualMachine.networkDevices.count != configuration.networkDevices.count {
             logger.error("Runtime network device count \(virtualMachine.networkDevices.count) does not match configuration count \(configuration.networkDevices.count)")
         }
-        policyObservation = VirtualBuddyManagedPreferences.schema.reader()
+        policyObservation = VirtualBuddyManagedPreferences.reader()
             .observeChanges(for: .disableBridgedNetworking) { [weak self] in
                 self?.enforcePolicy()
             }

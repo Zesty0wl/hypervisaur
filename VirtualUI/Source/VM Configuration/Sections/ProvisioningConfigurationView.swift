@@ -187,7 +187,7 @@ struct ProvisioningConfigurationView: View {
             }
             /// Recover existing provisioning configuration if available.
             .task {
-                guard let provisioning = configuration.provisioning else { return }
+                guard let provisioning = configuration.verifiedProvisioning else { return }
                 data = FormData(provisioning)
             }
         }

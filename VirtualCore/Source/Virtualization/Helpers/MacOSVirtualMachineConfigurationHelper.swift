@@ -80,8 +80,11 @@ struct MacOSVirtualMachineConfigurationHelper: VirtualMachineConfigurationHelper
     }
 
     @available(macOS 27.0, *)
+    /// Provisioning creates the guest's first user account, so it's only offered until the virtual machine has started up.
     static func createProvisioningOptions(for vm: VBVirtualMachine) -> VZMacGuestProvisioningOptions? {
-        guard vm.configuration.provisioningEnabled, let provisioning = vm.configuration.provisioning else { return nil }
+        guard vm.configuration.provisioningEnabled, !vm.hasBootedNonRecoveryAtLeastOnce,
+              let provisioning = vm.configuration.verifiedProvisioning
+        else { return nil }
 
         return createProvisioningOptions(with: provisioning)
     }

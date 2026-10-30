@@ -134,6 +134,8 @@ public final class QEMUVirtualMachine: ObservableObject {
 
     func resume() async throws {
         guard state == .paused, let monitor else { return }
+        /// The restriction may have been turned on while the virtual machine was paused.
+        enforceSharedFoldersPolicy()
         try await monitor.execute("cont")
         state = .running
 
@@ -496,7 +498,7 @@ public final class QEMUVirtualMachine: ObservableObject {
             logger.notice("Not sharing folders, because they're disabled, unavailable, or Samba isn't installed")
         }
 
-        sharedFoldersPolicyObservation = VirtualBuddyManagedPreferences.schema.reader()
+        sharedFoldersPolicyObservation = VirtualBuddyManagedPreferences.reader()
             .observeChanges(for: .disableSharedFolders) { [weak self] in
                 self?.enforceSharedFoldersPolicy()
             }

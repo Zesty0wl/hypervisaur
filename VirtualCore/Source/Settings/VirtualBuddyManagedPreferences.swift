@@ -16,14 +16,19 @@ public enum VirtualBuddyManagedPreferences: ManagedPreferencesNamespace {
         }
     }
 
-    static var sharedFoldersDisabled: Bool {
-        schema.reader().value(for: .disableSharedFolders, default: false)
+    /// Reads the app's managed preferences, and observes changes to them made by MDM and other processes as well as this one.
+    static func reader() -> ManagedPreferenceReader<VirtualBuddyManagedPreferences> {
+        schema.reader(store: ObservedManagedPreferenceStore())
     }
 
-    static var guestAppDisabled: Bool { schema.reader().value(for: .disableGuestApp, default: false) }
-    static var usbPassthroughDisabled: Bool { schema.reader().value(for: .disableUSBPassthrough, default: false) }
-    static var bridgedNetworkingDisabled: Bool { schema.reader().value(for: .disableBridgedNetworking, default: false) }
-    static var microphoneInputDisabled: Bool { schema.reader().value(for: .disableMicrophoneInput, default: false) }
+    static var sharedFoldersDisabled: Bool {
+        reader().value(for: .disableSharedFolders, default: false)
+    }
+
+    static var guestAppDisabled: Bool { reader().value(for: .disableGuestApp, default: false) }
+    static var usbPassthroughDisabled: Bool { reader().value(for: .disableUSBPassthrough, default: false) }
+    static var bridgedNetworkingDisabled: Bool { reader().value(for: .disableBridgedNetworking, default: false) }
+    static var microphoneInputDisabled: Bool { reader().value(for: .disableMicrophoneInput, default: false) }
 
     static let logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "ManagedPreferences")
 }

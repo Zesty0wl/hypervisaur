@@ -69,7 +69,7 @@ public final class VMUSBDeviceController {
     public func start() {
         isActive = true
         if policyObservation == nil {
-            policyObservation = VirtualBuddyManagedPreferences.schema.reader()
+            policyObservation = VirtualBuddyManagedPreferences.reader()
                 .observeChanges(for: .disableUSBPassthrough) { [weak self] in
                     Task { [weak self] in
                         await self?.enforcePolicy()

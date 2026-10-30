@@ -19,6 +19,11 @@ public struct KeychainReference: Codable, Sendable {
 
     public var projectedValue: Self { self }
 
+    /// The service of the keychain item.
+    public var service: String { keychainItem.service }
+    /// The account of the keychain item.
+    public var account: String { keychainItem.account }
+
     public static let stringPrefix = "@@KEYCHAIN@@"
 
     private let keychainItem: KeychainPasswordItem
@@ -42,14 +47,15 @@ public struct KeychainReference: Codable, Sendable {
     
     // MARK: - Duplicate
 
-    public mutating func duplicate(newAccount: String) throws {
-        guard newAccount != keychainItem.account else {
-            throw "Keychain reference duplicate must use a different value for account."
+    /// Copies the password to a new item, and refers to that one instead.
+    public mutating func duplicate(service: String, account: String) throws {
+        guard service != keychainItem.service || account != keychainItem.account else {
+            throw "Keychain reference duplicate must use a different item."
         }
 
         let value = try keychainItem.readPassword()
 
-        let copy = KeychainReference(service: keychainItem.service, account: newAccount)
+        let copy = KeychainReference(service: service, account: account)
         try copy.write(value)
 
         self = copy

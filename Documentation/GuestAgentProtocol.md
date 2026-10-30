@@ -70,6 +70,8 @@ If anything fails, or the Mac sends `terminate`, the agent removes the hidden fo
 
 The desktop is the one of the user signed in at the guest's display: on Windows, the user of the active console session, and on Linux, the user of the active graphical session on seat0. The agent replies `failed` if nobody is signed in.
 
+On Linux, the desktop is the folder that the user's `~/.config/user-dirs.dirs` names, or `~/Desktop`, and it must be inside their home folder. See version 5 for how the agent, which runs as root, works there.
+
 ### Getting files from the guest
 
 1. The Mac sends `getFiles` with the paths.
@@ -107,3 +109,13 @@ Drives belong to the session of the user who connected them, so the agent starts
 3. Connects each share that isn't connected yet to the last free drive letter, from Z: down, in the order of the list. While the network is still starting, it tries again every 2 seconds, 20 times. The drives aren't remembered, since the agent connects them at each sign-in, and Windows would otherwise complain at sign-in when they can't be reached.
 
 When nothing is shared, it disconnects every drive for the server and removes the saved credentials.
+
+## Version 5: Linux file delivery
+
+Version 5 only changes how Linux agents put files in the guest, and the frames are the same as version 3. The agent runs as root, but the user whose desktop it puts files on can change anything in their home folder, including while a transfer is going, so the agent never uses a path there:
+
+1. It opens each folder from the one it's in without following symbolic links, starting from the user's home folder, and creates, changes, moves and removes everything through those descriptors. A desktop that `user-dirs.dirs` puts outside the home folder isn't used, and a symbolic link anywhere on the way to the desktop, or in the transfer, makes the transfer fail.
+2. The hidden folder belongs to root and only root can open it, so the user can't change what's in it until the items are moved onto the desktop. The items in it belong to the user.
+3. `user-dirs.dirs` is only read if it's a regular file, and without waiting, so that a named pipe in its place can't stop the agent.
+
+Linux agents report version 5, so Hypervisaur updates agents that report an earlier version through the agent itself. They ignore `shareFolders`, which Hypervisaur only sends to Windows.

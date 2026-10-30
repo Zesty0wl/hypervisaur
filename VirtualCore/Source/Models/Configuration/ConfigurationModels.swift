@@ -452,6 +452,10 @@ public struct VBMacDevice: Hashable, Codable {
 
 public struct VBMacProvisioningConfiguration: Hashable, Codable, Sendable {
     public static let keychainItemService = "com.neiljohn.hypervisaur.provisioning"
+
+    /// The services that passwords have been saved under, including before Hypervisaur was renamed from VirtualBuddy, so
+    /// that virtual machines set up then can still be provisioned.
+    static let keychainItemServices: Set<String> = [keychainItemService, "codes.rambo.VirtualBuddy.Provisioning"]
     
     public var enablesRemoteLogin: Bool
     public var logsInAutomatically: Bool
@@ -590,6 +594,20 @@ public extension VBMacConfiguration {
     }
 
     var provisioningSetup: Bool { provisioning != nil }
+
+    /// The provisioning configuration, if its password is the one saved for this virtual machine.
+    ///
+    /// The configuration can come from somewhere else, such as a virtual machine that was imported, so the keychain item it
+    /// refers to isn't trusted: it must be a provisioning password, saved for this virtual machine's provisioning UUID.
+    /// Otherwise, it could name any password in the keychain, which would be read and given to the guest.
+    var verifiedProvisioning: VBMacProvisioningConfiguration? {
+        guard let provisioning else { return nil }
+        let reference = provisioning.$password
+        guard VBMacProvisioningConfiguration.keychainItemServices.contains(reference.service),
+              reference.account == provisioningUUID.uuidString
+        else { return nil }
+        return provisioning
+    }
 }
 
 // MARK: - Sharing And Other Features
@@ -1070,9 +1088,8 @@ public extension VBMacConfiguration {
         copy.provisioningUUID = UUID()
 
         /// Create unique copy of provisioning with Keychain item pointing to the new UUID.
-        if let provisioning {
-            copy.provisioning = try provisioning.duplicate(destinationUUID: copy.provisioningUUID)
-        }
+        /// Provisioning whose password isn't this virtual machine's own isn't copied, since that would copy someone else's.
+        copy.provisioning = try verifiedProvisioning?.duplicate(destinationUUID: copy.provisioningUUID)
 
         /// Currently only the boot volume configuration is duplicated.
         copy.hardware.storageDevices = hardware.storageDevices.filter { $0.isBootVolume }
@@ -1082,9 +1099,10 @@ public extension VBMacConfiguration {
 }
 
 extension VBMacProvisioningConfiguration {
+    /// The copy's password is saved under the current service, whatever the original's was saved under.
     func duplicate(destinationUUID: UUID) throws -> VBMacProvisioningConfiguration {
         var copy = self
-        try copy._password.duplicate(newAccount: destinationUUID.uuidString)
+        try copy._password.duplicate(service: Self.keychainItemService, account: destinationUUID.uuidString)
         return copy
     }
 }

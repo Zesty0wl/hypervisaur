@@ -18,7 +18,6 @@ import platform
 import pty
 import pwd
 import re
-import shutil
 import signal
 import socket
 import stat
@@ -30,7 +29,7 @@ import threading
 import time
 
 PORT_PATH = "/dev/virtio-ports/hypervisaur.agent"
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 5
 
 # The virtio socket port the agent also listens on, which is many times faster than the console port.
 SOCKET_PORT = 51781
@@ -255,46 +254,147 @@ def desktop_user():
     return None
 
 
-def desktop_folder(user):
-    """The user's desktop folder, as their XDG user directories name it, which is created if it doesn't exist."""
-    path = os.path.join(user.pw_dir, "Desktop")
+# The agent runs as root, but the user it puts files on the desktop of can change anything in their home folder, including
+# while a transfer is going. So nothing there is used by its path: each folder is opened from the one it's in, without
+# following symbolic links, and everything is created, changed and moved through those descriptors.
+FOLDER_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+# user-dirs.dirs is a few lines long; anything much larger isn't one.
+USER_DIRS_MAX_SIZE = 64 * 1024
+
+
+def open_folder(parent_fd, name):
+    """Opens a folder in another without following a symbolic link. Fails if it's anything other than a folder."""
+    return os.open(name, FOLDER_FLAGS, dir_fd=parent_fd)
+
+
+def open_folders(fd, components, create_for=None):
+    """Opens the folder at the path's components from the folder `fd`, each from the one before. Folders that don't exist
+    are created for the user `create_for` if it's given. The caller closes the folder that's returned."""
+    fd = os.dup(fd)
     try:
-        with open(os.path.join(user.pw_dir, ".config", "user-dirs.dirs")) as file:
-            for line in file:
-                match = re.match(r'\s*XDG_DESKTOP_DIR\s*=\s*"(.*)"\s*$', line)
-                if match:
-                    value = match.group(1).replace("$HOME", user.pw_dir)
-                    if value.startswith("/") and os.path.normpath(value) != os.path.normpath(user.pw_dir):
-                        path = value
+        for name in components:
+            created = False
+            if create_for is not None:
+                try:
+                    os.mkdir(name, 0o755, dir_fd=fd)
+                    created = True
+                except FileExistsError:
+                    pass
+            next_fd = open_folder(fd, name)
+            os.close(fd)
+            fd = next_fd
+            if created:
+                os.fchown(fd, create_for.pw_uid, create_for.pw_gid)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def remove_folder(parent_fd, name):
+    """Removes a folder in another and everything in it. Each folder is opened from the one it's in, so nothing outside it
+    is removed whatever is renamed or replaced in it meanwhile. Whatever can't be removed is left."""
+    try:
+        stack = [(parent_fd, name, open_folder(parent_fd, name), set())]
     except OSError:
-        pass
+        return
+    while stack:
+        _, _, fd, skipped = stack[-1]
+        try:
+            entries = os.listdir(fd)
+        except OSError:
+            entries = []
+        child = None
+        for entry in entries:
+            if entry in skipped:
+                continue
+            try:
+                if stat.S_ISDIR(os.stat(entry, dir_fd=fd, follow_symlinks=False).st_mode):
+                    # It's only gone into once, so a folder that can't be emptied doesn't stop the rest being removed.
+                    skipped.add(entry)
+                    child = (fd, entry, open_folder(fd, entry), set())
+                    break
+                os.unlink(entry, dir_fd=fd)
+            except OSError:
+                skipped.add(entry)
+        if child is not None:
+            stack.append(child)
+            continue
+        parent, folder, fd, _ = stack.pop()
+        os.close(fd)
+        try:
+            os.rmdir(folder, dir_fd=parent)
+        except OSError:
+            pass
 
-    if not os.path.isdir(path):
-        os.makedirs(path, exist_ok=True)
-        os.chown(path, user.pw_uid, user.pw_gid)
-    return path
+
+def configured_desktop(home_fd, home):
+    """The components of the desktop folder that the user's ~/.config/user-dirs.dirs names, relative to their home folder,
+    or None if it doesn't name one inside their home folder."""
+    try:
+        config_fd = open_folders(home_fd, [".config"])
+        try:
+            # It's opened without waiting, so that a named pipe in its place can't stop the agent.
+            fd = os.open("user-dirs.dirs", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=config_fd)
+        finally:
+            os.close(config_fd)
+        with os.fdopen(fd, "rb") as file:
+            if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+                return None
+            text = file.read(USER_DIRS_MAX_SIZE).decode("utf-8", "replace")
+    except OSError:
+        return None
+
+    components = None
+    for line in text.splitlines():
+        match = re.match(r'\s*XDG_DESKTOP_DIR\s*=\s*"(.*)"\s*$', line)
+        if match:
+            value = os.path.normpath(match.group(1).replace("$HOME", home))
+            if value.startswith(home.rstrip("/") + "/"):
+                components = value[len(home.rstrip("/")) + 1:].split("/")
+    return components
 
 
-def unique_path(folder, name):
+def desktop_folder(user):
+    """The user's desktop folder, as their XDG user directories name it, which is created if it doesn't exist. It must be
+    inside their home folder. Returns its path and an open descriptor for it, which the caller closes."""
+    home = os.path.normpath(user.pw_dir)
+    home_fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        components = configured_desktop(home_fd, home) or ["Desktop"]
+        return os.path.join(home, *components), open_folders(home_fd, components, create_for=user)
+    finally:
+        os.close(home_fd)
+
+
+def unique_name(folder_fd, name):
     """A name that isn't taken in the folder: the name itself, or Name (2).ext, Name (3).ext and so on."""
-    candidate = os.path.join(folder, name)
-    if not os.path.lexists(candidate):
-        return candidate
+    def taken(candidate):
+        try:
+            os.stat(candidate, dir_fd=folder_fd, follow_symlinks=False)
+            return True
+        except FileNotFoundError:
+            return False
+
+    if not taken(name):
+        return name
     base, extension = os.path.splitext(name)
     if not base:
         base, extension = name, ""
     number = 2
     while True:
-        candidate = os.path.join(folder, f"{base} ({number}){extension}")
-        if not os.path.lexists(candidate):
+        candidate = f"{base} ({number}){extension}"
+        if not taken(candidate):
             return candidate
         number += 1
 
 
 class IncomingTransfer:
     """Files the Mac puts on the desktop. They're written into a hidden folder there first, so that nothing is seen half
-    written, then moved into place once they've all arrived. Frames are handled on the agent's thread, so writing to the
-    disk holds up reading from the port, which keeps the Mac from sending faster than the files are written."""
+    written, then moved into place once they've all arrived. The hidden folder belongs to root, so the user can't change
+    what's in it, and the items in it belong to the user. Frames are handled on the agent's thread, so writing to the disk
+    holds up reading from the port, which keeps the Mac from sending faster than the files are written."""
 
     def __init__(self, agent, channel):
         self.agent = agent
@@ -302,12 +402,6 @@ class IncomingTransfer:
         self.user = desktop_user()
         if self.user is None:
             raise TransferError("Nobody is signed in at the virtual machine's display.")
-
-        self.destination = desktop_folder(self.user)
-        self._remove_abandoned_staging()
-        self.staging = os.path.join(self.destination, f".hypervisaur-{channel}-{int(time.time() * 1000)}")
-        os.mkdir(self.staging, 0o700)
-        os.chown(self.staging, self.user.pw_uid, self.user.pw_gid)
 
         self.folders = set()
         self.files = set()
@@ -317,22 +411,39 @@ class IncomingTransfer:
         self.written = 0
         self.acknowledged = 0
 
+        self.destination, self.destination_fd = desktop_folder(self.user)
+        self.staging_fd = None
+        try:
+            self._remove_abandoned_staging()
+            self.staging_name = f".hypervisaur-{channel}-{int(time.time() * 1000)}"
+            os.mkdir(self.staging_name, 0o700, dir_fd=self.destination_fd)
+            staging_fd = open_folder(self.destination_fd, self.staging_name)
+            # Only root can make a folder that belongs to root, so this is the one the agent made rather than one the user
+            # put in its place, which is left alone.
+            if os.fstat(staging_fd).st_uid != os.geteuid():
+                os.close(staging_fd)
+                raise TransferError("The hidden folder for the transfer was replaced while it was being made.")
+            self.staging_fd = staging_fd
+        except BaseException:
+            self.cleanup()
+            raise
+
     def _remove_abandoned_staging(self):
         """Removes hidden folders that copies left behind when the agent stopped during them, such as when it was updated.
         A folder that changed in the last ten minutes may belong to a copy that's still going, so it's left alone."""
         try:
-            names = os.listdir(self.destination)
+            names = os.listdir(self.destination_fd)
         except OSError:
             return
         for name in names:
             if not name.startswith(".hypervisaur-"):
                 continue
-            path = os.path.join(self.destination, name)
             try:
-                if os.path.isdir(path) and not os.path.islink(path) and time.time() - os.lstat(path).st_mtime > 600:
-                    shutil.rmtree(path, ignore_errors=True)
+                info = os.stat(name, dir_fd=self.destination_fd, follow_symlinks=False)
             except OSError:
-                pass
+                continue
+            if stat.S_ISDIR(info.st_mode) and time.time() - info.st_mtime > 600:
+                remove_folder(self.destination_fd, name)
 
     def receive(self, kind, payload):
         """Handles a frame of the transfer. Returns True once the transfer has finished."""
@@ -349,8 +460,12 @@ class IncomingTransfer:
             self.written += len(payload)
         elif kind == FILES_END:
             self._finish_file()
-            for path, modified in reversed(self.folder_times):
-                os.utime(path, (modified, modified), follow_symlinks=False)
+            for components, modified in reversed(self.folder_times):
+                folder_fd = open_folders(self.staging_fd, components)
+                try:
+                    os.utime(folder_fd, (modified, modified))
+                finally:
+                    os.close(folder_fd)
             self._acknowledge(force=True)
             paths = self._move_into_place()
             self.agent.port.send(TRANSFERRED, self.channel, "\n".join(paths).encode())
@@ -373,59 +488,76 @@ class IncomingTransfer:
 
         parent = "/".join(components[:-1])
         if parent and parent not in self.folders:
-            raise TransferError(f"\u201c{path}\u201d isn't inside a folder of the transfer.")
+            raise TransferError(f"“{path}” isn't inside a folder of the transfer.")
         if path in self.folders or path in self.files:
-            raise TransferError(f"\u201c{path}\u201d is in the transfer twice.")
-
-        target = os.path.join(self.staging, *components)
-        mode = (permissions & 0o777) | 0o600 if permissions else None
-
-        if item_type == 1:
-            os.mkdir(target, mode if mode is not None else 0o755)
-            os.chown(target, self.user.pw_uid, self.user.pw_gid)
-            if mode is not None:
-                os.chmod(target, mode | 0o700)
-            self.folders.add(path)
-            if modified:
-                self.folder_times.append((target, modified))
-        elif item_type == 0:
-            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            os.fchown(descriptor, self.user.pw_uid, self.user.pw_gid)
-            self.files.add(path)
-            self.current = {"file": os.fdopen(descriptor, "wb"), "path": target, "remaining": size, "mode": mode, "modified": modified}
-            if size == 0:
-                self._finish_file()
-        else:
+            raise TransferError(f"“{path}” is in the transfer twice.")
+        if item_type not in (0, 1):
             raise TransferError(f"A file has a type that isn't known ({item_type}).")
 
+        name = components[-1]
+        mode = (permissions & 0o777) | 0o600 if permissions else None
+        parent_fd = open_folders(self.staging_fd, components[:-1])
+        try:
+            if item_type == 1:
+                os.mkdir(name, 0o700, dir_fd=parent_fd)
+                folder_fd = open_folder(parent_fd, name)
+                try:
+                    os.fchown(folder_fd, self.user.pw_uid, self.user.pw_gid)
+                    os.fchmod(folder_fd, mode | 0o700 if mode is not None else 0o755)
+                finally:
+                    os.close(folder_fd)
+                self.folders.add(path)
+                if modified:
+                    self.folder_times.append((components, modified))
+            else:
+                descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
+                os.fchown(descriptor, self.user.pw_uid, self.user.pw_gid)
+                self.files.add(path)
+                self.current = {"file": os.fdopen(descriptor, "wb"), "remaining": size, "mode": mode, "modified": modified}
+        finally:
+            os.close(parent_fd)
+
         if len(components) == 1:
-            self.top_level.append(target)
+            self.top_level.append(name)
+        if item_type == 0 and size == 0:
+            self._finish_file()
 
     def _finish_file(self):
         if self.current is None:
             return
         current, self.current = self.current, None
-        current["file"].close()
-        if current["remaining"]:
-            raise TransferError("The transfer ended before all of a file arrived.")
-        os.chmod(current["path"], current["mode"] if current["mode"] is not None else 0o644)
-        if current["modified"]:
-            os.utime(current["path"], (current["modified"], current["modified"]), follow_symlinks=False)
+        file = current["file"]
+        try:
+            if current["remaining"]:
+                raise TransferError("The transfer ended before all of a file arrived.")
+            file.flush()
+            os.fchmod(file.fileno(), current["mode"] if current["mode"] is not None else 0o644)
+            if current["modified"]:
+                os.utime(file.fileno(), (current["modified"], current["modified"]))
+        finally:
+            file.close()
 
     def _move_into_place(self):
         paths = []
-        for source in self.top_level:
-            target = unique_path(self.destination, os.path.basename(source))
-            os.rename(source, target)
-            paths.append(target)
+        for name in self.top_level:
+            target = unique_name(self.destination_fd, name)
+            os.rename(name, target, src_dir_fd=self.staging_fd, dst_dir_fd=self.destination_fd)
+            paths.append(os.path.join(self.destination, target))
         self.cleanup()
         return paths
 
     def cleanup(self):
+        """Removes the hidden folder and whatever is still in it. Calling it again does nothing."""
         if self.current is not None:
             self.current["file"].close()
             self.current = None
-        shutil.rmtree(self.staging, ignore_errors=True)
+        if self.staging_fd is not None:
+            os.close(self.staging_fd)
+            self.staging_fd = None
+            remove_folder(self.destination_fd, self.staging_name)
+        if self.destination_fd is not None:
+            os.close(self.destination_fd)
+            self.destination_fd = None
 
 
 class OutgoingTransfer:

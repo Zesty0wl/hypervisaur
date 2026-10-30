@@ -265,7 +265,7 @@ public final class VMInstance: NSObject, ObservableObject {
         didHandleStop = false
         _virtualMachine = virtualMachine
         runtimeConfiguration = config
-        sharedFoldersPolicyObservation = VirtualBuddyManagedPreferences.schema.reader()
+        sharedFoldersPolicyObservation = VirtualBuddyManagedPreferences.reader()
             .observeChanges(for: .disableSharedFolders) { [weak self] in
                 self?.enforceSharedFoldersPolicy()
             }
@@ -480,7 +480,7 @@ public final class VMInstance: NSObject, ObservableObject {
             enforceSharedFoldersPolicy()
             networkAttachmentHelper?.enforcePolicy()
             try runtimeConfiguration.require("The VM configuration is unavailable.")
-                .validateMicrophonePolicy(preferences: VirtualBuddyManagedPreferences.schema.reader())
+                .validateMicrophonePolicy(preferences: VirtualBuddyManagedPreferences.reader())
             try await vm.start(options: startOptions)
             enforceSharedFoldersPolicy()
             startGuestAgent()
@@ -531,7 +531,7 @@ public final class VMInstance: NSObject, ObservableObject {
         networkAttachmentHelper?.enforcePolicy()
         if #available(macOS 27.0, *) { await usbDeviceController?.enforcePolicy() }
         try runtimeConfiguration.require("The VM configuration is unavailable.")
-            .validateMicrophonePolicy(preferences: VirtualBuddyManagedPreferences.schema.reader())
+            .validateMicrophonePolicy(preferences: VirtualBuddyManagedPreferences.reader())
         try await vm.resume()
         enforceSharedFoldersPolicy()
     }
@@ -737,7 +737,7 @@ public final class VMInstance: NSObject, ObservableObject {
 
             /// Policies that can't be applied to a session that's already running have to be found out now, while the saved session is still intact.
             do {
-                try configuration.validateMicrophonePolicy(preferences: VirtualBuddyManagedPreferences.schema.reader())
+                try configuration.validateMicrophonePolicy(preferences: VirtualBuddyManagedPreferences.reader())
             } catch {
                 throw SavedSessionError.policyBlocksResume("Microphone input is disabled by your organization, but it was enabled when this session was saved and can't be turned off without restarting. Discard the saved session to start this virtual machine without microphone input.")
             }

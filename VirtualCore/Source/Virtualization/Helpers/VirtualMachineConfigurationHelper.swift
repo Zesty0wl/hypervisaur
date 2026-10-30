@@ -154,7 +154,7 @@ extension VBNetworkDevice {
 
     private var vzAttachment: VZNetworkDeviceAttachment? {
         get throws {
-            try makeAttachment(preferences: VirtualBuddyManagedPreferences.schema.reader())
+            try makeAttachment(preferences: VirtualBuddyManagedPreferences.reader())
         }
     }
 
@@ -203,7 +203,7 @@ extension VBPointingDevice {
 extension VBSoundDevice {
 
     var vzConfiguration: VZAudioDeviceConfiguration {
-        makeConfiguration(preferences: VirtualBuddyManagedPreferences.schema.reader())
+        makeConfiguration(preferences: VirtualBuddyManagedPreferences.reader())
     }
 
     func makeConfiguration(preferences: ManagedPreferenceReader<VirtualBuddyManagedPreferences>) -> VZAudioDeviceConfiguration {
@@ -235,7 +235,7 @@ extension VBMacConfiguration {
     
     var vzSharedFoldersFileSystemDevices: [VZDirectorySharingDeviceConfiguration] {
         get throws {
-            try makeSharedFoldersFileSystemDevices(preferences: VirtualBuddyManagedPreferences.schema.reader())
+            try makeSharedFoldersFileSystemDevices(preferences: VirtualBuddyManagedPreferences.reader())
         }
     }
 
