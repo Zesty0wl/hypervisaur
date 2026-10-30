@@ -274,7 +274,7 @@ extension QEMUInstance: VMSessionSavingInstance {
             memorySize: model.configuration.hardware.memorySize,
             qemuDescription: try await machine.savedSessionDescription(),
             stateFileName: SavedSessionLayout.qemuStateFileName,
-            screenshotImage: machine.latestFrame
+            screenshotImage: machine.currentFrame()
         )
     }
 
@@ -317,7 +317,7 @@ extension QEMUInstance: VMSessionSavingInstance {
             network: description.network ?? .qemu
         )
 
-        guard try machine.comparableArguments() == description.arguments else {
+        guard try machine.comparableArguments() == QEMULaunchConfiguration.withoutConnections(description.arguments) else {
             throw SavedSessionError.configurationChanged("Hypervisaur starts Windows virtual machines differently from when this session was saved.")
         }
 

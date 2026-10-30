@@ -18,10 +18,13 @@ public final class QEMUVirtualMachine: ObservableObject {
 
     @Published public private(set) var state = State.stopped
 
-    /// The most recent frame from the guest's display.
-    public private(set) var latestFrame: CGImage?
+    /// What the guest's display shows. See ``QEMUDisplay``.
+    public private(set) var displaySurface: QEMUDisplaySurface?
+    /// The pointer that the guest asked to be shown, if it has.
+    public private(set) var cursor: QEMUCursor?
+    public private(set) var isCursorVisible = true
 
-    private var frameObservers = [UUID: (CGImage) -> Void]()
+    private var displayObservers = [UUID: ([QEMUDisplayChange]) -> Void]()
 
     /// Called once when the virtual machine stops, with an error if it didn't stop because the guest shut down or was told to stop.
     var onStop: ((Error?) -> Void)?
@@ -38,7 +41,9 @@ public final class QEMUVirtualMachine: ObservableObject {
     private var swtpmProcess: Process?
     private var networks: QEMUNetwork?
     private var monitor: QMPClient?
-    private var display: VNCClient?
+    private var display: QEMUDisplay?
+    /// Sends keyboard and mouse input, and shares the clipboard.
+    private var input: VNCClient?
     private var clipboardSync: QEMUClipboardSync?
     private var guestAgent: GuestAgentConnection?
     var guestAgentConnection: GuestAgentConnection? { guestAgent }
@@ -87,26 +92,37 @@ public final class QEMUVirtualMachine: ObservableObject {
 
     // MARK: - Display
 
-    /// Registers a closure that's called on the main queue with each new frame. Returns a token for ``removeFrameObserver(_:)``.
-    public func addFrameObserver(_ observer: @escaping (CGImage) -> Void) -> UUID {
+    /// Registers a closure that's called on the main queue with what changes on the guest's display, starting with
+    /// what it shows now. Returns a token for ``removeDisplayObserver(_:)``.
+    public func addDisplayObserver(_ observer: @escaping ([QEMUDisplayChange]) -> Void) -> UUID {
         let token = UUID()
-        frameObservers[token] = observer
-        if let latestFrame { observer(latestFrame) }
+        displayObservers[token] = observer
+
+        var current: [QEMUDisplayChange] = [.surface(displaySurface)]
+        if let cursor { current.append(.cursor(cursor)) }
+        current.append(.cursorVisibility(isCursorVisible))
+        observer(current)
+
         return token
     }
 
-    public func removeFrameObserver(_ token: UUID) {
-        frameObservers[token] = nil
+    public func removeDisplayObserver(_ token: UUID) {
+        displayObservers[token] = nil
+    }
+
+    /// A copy of what the guest's display shows now, such as for a screenshot.
+    public func currentFrame() -> CGImage? {
+        displaySurface?.makeImage()
     }
 
     public func sendKey(_ keyNumber: UInt32, isDown: Bool) {
         guard state == .running else { return }
-        display?.sendKey(keyNumber, isDown: isDown)
+        input?.sendKey(keyNumber, isDown: isDown)
     }
 
     public func sendPointer(x: Int, y: Int, buttons: VNCClient.PointerButtons) {
         guard state == .running else { return }
-        display?.sendPointer(x: x, y: y, buttons: buttons)
+        input?.sendPointer(x: x, y: y, buttons: buttons)
     }
 
     /// Shares the Mac's clipboard with the guest again, such as when the virtual machine's window becomes active,
@@ -252,7 +268,7 @@ public final class QEMUVirtualMachine: ObservableObject {
 
         let paths = QEMULaunchConfiguration.RuntimePaths(
             monitorSocket: runtimeDirectoryURL.appending(path: "qmp.sock"),
-            displaySocket: runtimeDirectoryURL.appending(path: "vnc.sock"),
+            vncSocket: runtimeDirectoryURL.appending(path: "vnc.sock"),
             tpmSocket: runtimeDirectoryURL.appending(path: "tpm.sock"),
             agentSocket: runtimeDirectoryURL.appending(path: "agent.sock"),
             networkSocketsDirectory: runtimeDirectoryURL
@@ -289,19 +305,30 @@ public final class QEMUVirtualMachine: ObservableObject {
         self.monitor = monitor
 
         let display = try await connectToQEMU {
-            try await VNCClient.connect(path: paths.displaySocket.path, timeout: .seconds(10), sharesClipboard: model.configuration.clipboardSharingEnabled)
+            try await QEMUDisplay.connect(monitor: monitor)
         }
-        display.onFrame = { [weak self] frame in
-            self?.deliver(frame)
+        display.onChange = { [weak self] changes in
+            self?.apply(changes)
         }
         display.onDisconnect = { [weak self] error in
             self?.logger.debug("Display disconnected: \(String(describing: error), privacy: .public)")
         }
         self.display = display
-        display.start()
+
+        let input = try await connectToQEMU {
+            try await VNCClient.connect(path: paths.vncSocket.path, timeout: .seconds(10), sharesClipboard: model.configuration.clipboardSharingEnabled)
+        }
+        input.onDisconnect = { [weak self] error in
+            self?.logger.debug("Input disconnected: \(String(describing: error), privacy: .public)")
+        }
+        if let displaySurface {
+            input.displaySize = displaySurface.bounds.size
+        }
+        self.input = input
+        input.start()
 
         if model.configuration.clipboardSharingEnabled {
-            let clipboardSync = QEMUClipboardSync(display: display)
+            let clipboardSync = QEMUClipboardSync(display: input)
             self.clipboardSync = clipboardSync
             clipboardSync.start()
         }
@@ -734,10 +761,13 @@ public final class QEMUVirtualMachine: ObservableObject {
 
         clipboardSync?.stop()
         clipboardSync = nil
-        display?.onFrame = nil
+        display?.onChange = nil
         display?.onDisconnect = nil
         display?.close()
         display = nil
+        input?.onDisconnect = nil
+        input?.close()
+        input = nil
 
         monitor?.close()
         monitor = nil
@@ -760,7 +790,10 @@ public final class QEMUVirtualMachine: ObservableObject {
         }
         runtimeDirectoryURL = nil
 
-        latestFrame = nil
+        /// What's showing the virtual machine keeps showing what it showed last, until there's something new to show.
+        displaySurface = nil
+        cursor = nil
+        isCursorVisible = true
     }
 
     private func reportStop(error: Error?) {
@@ -772,11 +805,25 @@ public final class QEMUVirtualMachine: ObservableObject {
         onStop?(error)
     }
 
-    private func deliver(_ frame: CGImage) {
-        latestFrame = frame
+    private func apply(_ changes: [QEMUDisplayChange]) {
+        for change in changes {
+            switch change {
+            case .surface(let surface):
+                displaySurface = surface
+                if let surface {
+                    input?.displaySize = surface.bounds.size
+                }
+            case .update:
+                break
+            case .cursor(let cursor):
+                self.cursor = cursor
+            case .cursorVisibility(let isVisible):
+                isCursorVisible = isVisible
+            }
+        }
 
-        for observer in frameObservers.values {
-            observer(frame)
+        for observer in displayObservers.values {
+            observer(changes)
         }
     }
 }

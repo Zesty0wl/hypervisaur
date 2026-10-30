@@ -259,6 +259,39 @@ struct QEMULaunchConfigurationTests {
         #expect(try qemuNetwork.comparableArguments() != makeConfiguration(for: vm).comparableArguments())
     }
 
+    @Test func displayIsServedOverDBusAndInputGoesThroughVNC() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        let arguments = try makeConfiguration(for: vm).arguments()
+
+        #expect(arguments.contains(["-display", "dbus,p2p=yes"]))
+        #expect(arguments.contains(["-vnc", "unix:/tmp/vbq-test/vnc.sock"]))
+    }
+
+    @Test func comparableArgumentsLeaveOutTheDisplayAndInputConnections() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        let comparable = try makeConfiguration(for: vm).comparableArguments()
+
+        #expect(!comparable.contains("-display"))
+        #expect(!comparable.contains("-vnc"))
+    }
+
+    @Test func sessionsSavedWhenTheDisplayWentThroughVNCCompareTheSame() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        let comparable = try makeConfiguration(for: vm).comparableArguments()
+        let qmpIndex = try #require(comparable.firstIndex(of: "-qmp"))
+
+        var savedEarlier = comparable
+        savedEarlier.insert(contentsOf: ["-display", "none", "-vnc", "unix:/$RUNTIME/vnc.sock"], at: qmpIndex)
+
+        #expect(QEMULaunchConfiguration.withoutConnections(savedEarlier) == comparable)
+    }
+
     @Test func qemusNetworkRunsSambaForTheFirstNetworkDevice() throws {
         let vm = try makeWindowsMachine()
         try createBootDisk(for: vm)
@@ -352,7 +385,7 @@ struct QEMULaunchConfigurationTests {
             toolchain: QEMUToolchain(homebrew: Homebrew(prefix: URL(filePath: "/opt/homebrew", directoryHint: .isDirectory))),
             runtimePaths: .init(
                 monitorSocket: URL(filePath: "/tmp/vbq-test/qmp.sock"),
-                displaySocket: URL(filePath: "/tmp/vbq-test/vnc.sock"),
+                vncSocket: URL(filePath: "/tmp/vbq-test/vnc.sock"),
                 tpmSocket: URL(filePath: "/tmp/vbq-test/tpm.sock"),
                 agentSocket: URL(filePath: "/tmp/vbq-test/agent.sock"),
                 networkSocketsDirectory: URL(filePath: "/tmp/vbq-test", directoryHint: .isDirectory)

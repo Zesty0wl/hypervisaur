@@ -3,9 +3,10 @@ import BuddyFoundation
 import CoreGraphics
 import OSLog
 
-/// Minimal RFB client used to display and control a QEMU virtual machine over a local socket.
+/// Minimal RFB client used to control a QEMU virtual machine over a local socket.
 ///
-/// Only the raw encoding is used since the connection never leaves the machine.
+/// The guest's display comes from ``QEMUDisplay`` instead, which shares QEMU's memory rather than copying the pixels,
+/// so this never asks QEMU for any.
 /// Keyboard input uses QEMU's extended key event, which carries scancodes instead of keysyms,
 /// so the guest receives the physical keys regardless of the host's keyboard layout.
 /// Text on the clipboard is shared with ``VNCClipboard``.
@@ -25,7 +26,6 @@ public final class VNCClient: @unchecked Sendable {
 
     private enum Encoding: Int32 {
         case raw = 0
-        case desktopSize = -223
         case qemuExtendedKeyEvent = -258
         case extendedClipboard = -1_063_131_698
     }
@@ -35,18 +35,12 @@ public final class VNCClient: @unchecked Sendable {
     private let connection: UnixSocketConnection
 
     private let stateLock = NSLock()
-    private var framebufferWidth: Int
-    private var framebufferHeight: Int
-    private var framebuffer: [UInt8]
-    private var pendingFrame: CGImage?
-    private var isFrameDeliveryScheduled = false
+    private var displayWidth: Int
+    private var displayHeight: Int
 
     private let sharesClipboard: Bool
     /// The text on the Mac's clipboard that the guest has been told about, ready to send when it's pasted in the guest.
     private var hostClipboardPayload: Data?
-
-    /// Called on the main queue with the most recent frame. Frames produced while the main queue is busy are dropped.
-    public var onFrame: ((CGImage) -> Void)?
 
     /// Called on the main queue once when the connection ends.
     public var onDisconnect: ((Error?) -> Void)?
@@ -57,15 +51,22 @@ public final class VNCClient: @unchecked Sendable {
     /// Called on the main queue with text that was copied in the guest.
     var onGuestClipboardText: ((String) -> Void)?
 
-    public var framebufferSize: CGSize {
-        stateLock.withLock { CGSize(width: framebufferWidth, height: framebufferHeight) }
+    /// The size of the guest's display, which pointer positions are kept inside. It starts out as the size QEMU says
+    /// the display is when connecting, and follows ``QEMUDisplay`` after that.
+    public var displaySize: CGSize {
+        get { stateLock.withLock { CGSize(width: displayWidth, height: displayHeight) } }
+        set {
+            stateLock.withLock {
+                displayWidth = Int(newValue.width)
+                displayHeight = Int(newValue.height)
+            }
+        }
     }
 
     private init(connection: UnixSocketConnection, width: Int, height: Int, sharesClipboard: Bool) {
         self.connection = connection
-        self.framebufferWidth = width
-        self.framebufferHeight = height
-        self.framebuffer = [UInt8](repeating: 0, count: width * height * 4)
+        self.displayWidth = width
+        self.displayHeight = height
         self.sharesClipboard = sharesClipboard
     }
 
@@ -118,9 +119,9 @@ public final class VNCClient: @unchecked Sendable {
         send(message)
     }
 
-    /// Sends the pointer position in framebuffer coordinates along with the buttons that are currently pressed.
+    /// Sends the pointer position in the display's pixels along with the buttons that are currently pressed.
     public func sendPointer(x: Int, y: Int, buttons: PointerButtons) {
-        let size = framebufferSize
+        let size = displaySize
         let clampedX = UInt16(clamping: min(max(x, 0), max(Int(size.width) - 1, 0)))
         let clampedY = UInt16(clamping: min(max(y, 0), max(Int(size.height) - 1, 0)))
 
@@ -230,7 +231,7 @@ public final class VNCClient: @unchecked Sendable {
     }
 
     private func configureSession() throws {
-        /// 32 bits per pixel, little-endian, true color with red/green/blue in bits 16/8/0, which is BGRA in memory.
+        /// 32 bits per pixel, so that any pixels QEMU sends anyway can be skipped.
         var pixelFormat = Data([0, 0, 0, 0])
         pixelFormat.append(contentsOf: [32, 24, 0, 1])
         pixelFormat.appendBigEndian(UInt16(255))
@@ -239,26 +240,13 @@ public final class VNCClient: @unchecked Sendable {
         pixelFormat.append(contentsOf: [16, 8, 0, 0, 0, 0])
         try connection.write(pixelFormat)
 
-        let encodings: [Encoding] = [.raw, .desktopSize, .qemuExtendedKeyEvent] + (sharesClipboard ? [.extendedClipboard] : [])
+        let encodings: [Encoding] = [.raw, .qemuExtendedKeyEvent] + (sharesClipboard ? [.extendedClipboard] : [])
         var setEncodings = Data([2, 0])
         setEncodings.appendBigEndian(UInt16(encodings.count))
         for encoding in encodings {
             setEncodings.appendBigEndian(UInt32(bitPattern: encoding.rawValue))
         }
         try connection.write(setEncodings)
-
-        try requestUpdate(incremental: false)
-    }
-
-    private func requestUpdate(incremental: Bool) throws {
-        let (width, height) = stateLock.withLock { (framebufferWidth, framebufferHeight) }
-
-        var message = Data([3, incremental ? 1 : 0])
-        message.appendBigEndian(UInt16(0))
-        message.appendBigEndian(UInt16(0))
-        message.appendBigEndian(UInt16(clamping: width))
-        message.appendBigEndian(UInt16(clamping: height))
-        try connection.write(message)
     }
 
     private func runReceiveLoop() throws {
@@ -294,104 +282,26 @@ public final class VNCClient: @unchecked Sendable {
         }
     }
 
+    /// QEMU only sends pixels when they're asked for, which they never are, but it acknowledges the extended key event
+    /// with an update that has no pixels.
     private func receiveFramebufferUpdate() throws {
         let header = try connection.read(exactly: 3)
         let rectangleCount = Int(header.bigEndianUInt16(at: 1))
 
-        var needsFullUpdate = false
-
         for _ in 0..<rectangleCount {
             let rectangle = try connection.read(exactly: 12)
-            let x = Int(rectangle.bigEndianUInt16(at: 0))
-            let y = Int(rectangle.bigEndianUInt16(at: 2))
             let width = Int(rectangle.bigEndianUInt16(at: 4))
             let height = Int(rectangle.bigEndianUInt16(at: 6))
             let encoding = Int32(bitPattern: rectangle.bigEndianUInt32(at: 8))
 
             switch Encoding(rawValue: encoding) {
             case .raw:
-                try receiveRawRectangle(x: x, y: y, width: width, height: height)
-            case .desktopSize:
-                resizeFramebuffer(width: width, height: height)
-                needsFullUpdate = true
+                _ = try connection.read(exactly: width * height * 4)
             case .qemuExtendedKeyEvent, .extendedClipboard:
                 break
             case .none:
                 throw Failure("Unsupported encoding \(encoding) from the display server.")
             }
-        }
-
-        publishFrame()
-
-        try requestUpdate(incremental: !needsFullUpdate)
-    }
-
-    private func receiveRawRectangle(x: Int, y: Int, width: Int, height: Int) throws {
-        let rowLength = width * 4
-        let data = try connection.read(exactly: rowLength * height)
-
-        stateLock.withLock {
-            guard x + width <= framebufferWidth, y + height <= framebufferHeight else { return }
-
-            data.withUnsafeBytes { source in
-                framebuffer.withUnsafeMutableBytes { destination in
-                    for row in 0..<height {
-                        let destinationOffset = ((y + row) * framebufferWidth + x) * 4
-                        let sourceOffset = row * rowLength
-                        destination.baseAddress!.advanced(by: destinationOffset)
-                            .copyMemory(from: source.baseAddress!.advanced(by: sourceOffset), byteCount: rowLength)
-                    }
-                }
-            }
-        }
-    }
-
-    private func resizeFramebuffer(width: Int, height: Int) {
-        stateLock.withLock {
-            framebufferWidth = width
-            framebufferHeight = height
-            framebuffer = [UInt8](repeating: 0, count: width * height * 4)
-        }
-    }
-
-    private func publishFrame() {
-        let shouldSchedule: Bool = stateLock.withLock {
-            guard framebufferWidth > 0, framebufferHeight > 0 else { return false }
-
-            let data = Data(framebuffer) as CFData
-            guard let provider = CGDataProvider(data: data),
-                  let image = CGImage(
-                    width: framebufferWidth,
-                    height: framebufferHeight,
-                    bitsPerComponent: 8,
-                    bitsPerPixel: 32,
-                    bytesPerRow: framebufferWidth * 4,
-                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                    bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
-                    provider: provider,
-                    decode: nil,
-                    shouldInterpolate: true,
-                    intent: .defaultIntent
-                  )
-            else { return false }
-
-            pendingFrame = image
-
-            guard !isFrameDeliveryScheduled else { return false }
-            isFrameDeliveryScheduled = true
-            return true
-        }
-
-        guard shouldSchedule else { return }
-
-        DispatchQueue.main.async { [self] in
-            let frame: CGImage? = stateLock.withLock {
-                isFrameDeliveryScheduled = false
-                defer { pendingFrame = nil }
-                return pendingFrame
-            }
-            guard let frame else { return }
-            onFrame?(frame)
         }
     }
 }

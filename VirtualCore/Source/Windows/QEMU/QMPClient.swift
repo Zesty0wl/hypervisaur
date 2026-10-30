@@ -38,8 +38,9 @@ final class QMPClient: @unchecked Sendable {
         return client
     }
 
+    /// - Parameter descriptor: A file descriptor that's passed to QEMU with the command, such as for `getfd`.
     @discardableResult
-    func execute(_ command: String, arguments: [String: Any]? = nil) async throws -> Any? {
+    func execute(_ command: String, arguments: [String: Any]? = nil, passing descriptor: OwnedFileDescriptor? = nil) async throws -> Any? {
         let id: String = lock.withLock {
             nextCommandID += 1
             return "vb-\(nextCommandID)"
@@ -64,7 +65,7 @@ final class QMPClient: @unchecked Sendable {
             }
 
             do {
-                try connection.write(data)
+                try connection.write(data, passing: descriptor)
             } catch {
                 let pending = lock.withLock { pendingCommands.removeValue(forKey: id) }
                 pending?.resume(throwing: error)

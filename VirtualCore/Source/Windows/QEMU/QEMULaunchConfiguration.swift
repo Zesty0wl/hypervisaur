@@ -4,7 +4,8 @@ import Foundation
 struct QEMULaunchConfiguration {
     struct RuntimePaths {
         var monitorSocket: URL
-        var displaySocket: URL
+        /// Where QEMU's VNC server listens, which keyboard and mouse input and the clipboard go through. See ``VNCClient``.
+        var vncSocket: URL
         var tpmSocket: URL
         var agentSocket: URL
         /// Where the networks of the virtual machine's network devices listen for QEMU. See ``networkSocket(forDeviceAt:)``.
@@ -13,7 +14,7 @@ struct QEMULaunchConfiguration {
         /// Stands in for the sockets' locations, which are different each time QEMU starts.
         static let placeholder = RuntimePaths(
             monitorSocket: URL(fileURLWithPath: "/$RUNTIME/qmp.sock"),
-            displaySocket: URL(fileURLWithPath: "/$RUNTIME/vnc.sock"),
+            vncSocket: URL(fileURLWithPath: "/$RUNTIME/vnc.sock"),
             tpmSocket: URL(fileURLWithPath: "/$RUNTIME/tpm.sock"),
             agentSocket: URL(fileURLWithPath: "/$RUNTIME/agent.sock"),
             networkSocketsDirectory: URL(fileURLWithPath: "/$RUNTIME", isDirectory: true)
@@ -153,9 +154,10 @@ struct QEMULaunchConfiguration {
             ]
         }
 
+        /// The display is served to Hypervisaur over D-Bus once QEMU is given a socket for it. See ``QEMUDisplay``.
         arguments += [
-            "-display", "none",
-            "-vnc", "unix:\(runtimePaths.displaySocket.path.qemuOptionEscaped)",
+            "-display", Self.displayBackend,
+            "-vnc", "unix:\(runtimePaths.vncSocket.path.qemuOptionEscaped)",
             "-qmp", "unix:\(runtimePaths.monitorSocket.path.qemuOptionEscaped),server=on,wait=off",
             /// The guest starts once the display is connected, so that nothing that's shown during boot is missed.
             "-S",
@@ -169,7 +171,8 @@ struct QEMULaunchConfiguration {
     }
 
     /// QEMU's arguments for booting the virtual machine, without anything that's allowed to change between runs: where the
-    /// virtual machine and QEMU's sockets are, and its name. A saved session can only be restored with the same arguments.
+    /// virtual machine and QEMU's sockets are, its name, and how Hypervisaur connects to its display and input. A saved
+    /// session can only be restored with the same arguments.
     func comparableArguments() throws -> [String] {
         var configuration = self
         configuration.runtimePaths = .placeholder
@@ -188,7 +191,27 @@ struct QEMULaunchConfiguration {
             arguments[index + 1] = "$NAME"
         }
 
-        return arguments
+        return Self.withoutConnections(arguments)
+    }
+
+    static let displayBackend = "dbus,p2p=yes"
+
+    /// How Hypervisaur connects to the guest's display and input isn't part of the virtual machine's state, so it's left
+    /// out when comparing arguments, including those of sessions saved before the display was served over D-Bus.
+    static func withoutConnections(_ arguments: [String]) -> [String] {
+        var remaining = [String]()
+        var index = arguments.startIndex
+
+        while index < arguments.endIndex {
+            if ["-display", "-vnc"].contains(arguments[index]) {
+                index += 2
+            } else {
+                remaining.append(arguments[index])
+                index += 1
+            }
+        }
+
+        return remaining
     }
 
     private var displayDeviceArgument: String {

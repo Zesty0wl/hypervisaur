@@ -39,7 +39,7 @@ public enum VMScreenCapture {
     @MainActor
     public static func screenshot(of runtime: VMRuntime, in region: VMCaptureRegion?) async throws -> CGImage {
         if let machine = runtime.qemuMachine {
-            guard let frame = machine.latestFrame else {
+            guard let frame = machine.currentFrame() else {
                 throw Failure("The virtual machine hasn’t shown anything on its display yet.")
             }
             return frame
@@ -60,7 +60,7 @@ public enum VMScreenCapture {
     @MainActor
     public static func preview(of runtime: VMRuntime, in region: VMCaptureRegion?, maxPixelSize: Int = previewMaxPixelSize) async -> CGImage? {
         if let machine = runtime.qemuMachine {
-            guard let frame = machine.latestFrame else { return nil }
+            guard let frame = machine.currentFrame() else { return nil }
             return try? await performOffMainActor { frame.vb_scaledToFit(maxPixelSize: maxPixelSize) }
         }
 

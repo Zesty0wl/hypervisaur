@@ -1,6 +1,7 @@
 import SwiftUI
 import Cocoa
 import Carbon.HIToolbox
+import OSLog
 import VirtualCore
 
 /// Displays a virtual machine that runs with QEMU and sends it keyboard and mouse input.
@@ -36,13 +37,13 @@ final class QEMUFramebufferView: NSView {
         didSet {
             guard machine !== oldValue else { return }
 
-            if let frameObserver, let oldValue {
-                oldValue.removeFrameObserver(frameObserver)
+            if let displayObserver, let oldValue {
+                oldValue.removeDisplayObserver(displayObserver)
             }
-            frameObserver = nil
-            layer?.contents = nil
+            displayObserver = nil
+            show(nil)
 
-            observeFramesIfNeeded()
+            observeDisplayIfNeeded()
         }
     }
 
@@ -101,21 +102,40 @@ final class QEMUFramebufferView: NSView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { fileDragAndDrop.performDragOperation(sender) }
 
     private let inputToggleMonitor = VMInputToggleEventMonitor()
-    private var frameObserver: UUID?
+    private var displayObserver: UUID?
     private var framebufferSize = CGSize.zero
+
+    /// Draws the display with the GPU. Without it, which only happens if the GPU can't be used, it's drawn as images.
+    private let renderer: QEMUDisplayRenderer? = {
+        do {
+            return try QEMUDisplayRenderer()
+        } catch {
+            Logger(subsystem: VirtualUIConstants.subsystemName, category: "QEMUFramebufferView").error("Drawing the display without the GPU: \(error, privacy: .public)")
+            return nil
+        }
+    }()
+    private var surface: QEMUDisplaySurface?
+    /// Draws the display at most once for each time the screen refreshes, and only when it's changed.
+    private var displayLink: CADisplayLink?
+    private var needsRedraw = false
+
+    private var guestCursor: QEMUCursor?
+    private var isGuestCursorVisible = true
 
     private var pressedKeys = Set<UInt32>()
     private var pressedButtons = VNCClient.PointerButtons()
     private var lastPointerLocation: (x: Int, y: Int)?
     private var scrollAccumulator = CGPoint.zero
 
-    /// The guest draws its own pointer, so the host's is hidden while it's over the guest's display.
+    /// The guest draws its own pointer unless it asks for one to be shown, so the host's is hidden while it's over the
+    /// guest's display.
     private static let invisibleCursor = NSCursor(image: NSImage(size: NSSize(width: 1, height: 1)), hotSpot: .zero)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
         wantsLayer = true
+        layerContentsRedrawPolicy = .never
         layer?.backgroundColor = NSColor.black.cgColor
         layer?.contentsGravity = .resizeAspect
         layer?.magnificationFilter = .linear
@@ -132,34 +152,109 @@ final class QEMUFramebufferView: NSView {
 
     override var wantsUpdateLayer: Bool { true }
 
-    /// Frames are only observed while the view is in a window, which also ensures the observer goes away with the view.
-    private func observeFramesIfNeeded() {
-        guard window != nil, frameObserver == nil, let machine else { return }
+    override func makeBackingLayer() -> CALayer {
+        renderer?.layer ?? super.makeBackingLayer()
+    }
 
-        frameObserver = machine.addFrameObserver { [weak self] frame in
-            self?.display(frame)
+    /// The display is only observed while the view is in a window, which also ensures the observer goes away with the view.
+    private func observeDisplayIfNeeded() {
+        guard window != nil, displayObserver == nil, let machine else { return }
+
+        displayObserver = machine.addDisplayObserver { [weak self] changes in
+            self?.apply(changes)
         }
     }
 
-    private func stopObservingFrames() {
-        guard let frameObserver else { return }
+    private func stopObservingDisplay() {
+        guard let displayObserver else { return }
 
-        machine?.removeFrameObserver(frameObserver)
-        self.frameObserver = nil
+        machine?.removeDisplayObserver(displayObserver)
+        self.displayObserver = nil
     }
 
-    private func display(_ frame: CGImage) {
-        let size = CGSize(width: frame.width, height: frame.height)
-        if size != framebufferSize {
-            framebufferSize = size
+    private func apply(_ changes: [QEMUDisplayChange]) {
+        for change in changes {
+            switch change {
+            case .surface(let surface):
+                show(surface)
+            case .update(let area):
+                renderer?.update(area)
+                setNeedsRedraw()
+            case .cursor(let cursor):
+                guestCursor = cursor
+                window?.invalidateCursorRects(for: self)
+            case .cursorVisibility(let isVisible):
+                /// QEMU says the pointer is shown each time the guest moves it.
+                guard isVisible != isGuestCursorVisible else { continue }
+                isGuestCursorVisible = isVisible
+                window?.invalidateCursorRects(for: self)
+            }
+        }
+    }
+
+    private func show(_ surface: QEMUDisplaySurface?) {
+        self.surface = surface
+        renderer?.show(surface)
+
+        /// The last size is kept while nothing is shown, such as while the guest restarts, so that the window doesn't change.
+        if let surface, surface.bounds.size != framebufferSize {
+            framebufferSize = surface.bounds.size
             window?.invalidateCursorRects(for: self)
-            displaySizeHandler?(size)
+            displaySizeHandler?(framebufferSize)
         }
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layer?.contents = frame
-        CATransaction.commit()
+        setNeedsRedraw()
+    }
+
+    private func setNeedsRedraw() {
+        needsRedraw = true
+        displayLink?.isPaused = false
+    }
+
+    @objc private func displayLinkFired(_ displayLink: CADisplayLink) {
+        guard needsRedraw else {
+            displayLink.isPaused = true
+            return
+        }
+        needsRedraw = false
+
+        redraw()
+    }
+
+    private func redraw() {
+        guard let renderer else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer?.contents = surface?.makeImage()
+            CATransaction.commit()
+            return
+        }
+
+        let backingBounds = convertToBacking(bounds)
+        renderer.layer.drawableSize = backingBounds.size
+
+        /// Metal's viewport is measured from the top left of the layer, in its pixels.
+        let backingRect = convertToBacking(displayRect).integral
+        let viewport = CGRect(
+            x: backingRect.minX - backingBounds.minX,
+            y: backingBounds.maxY - backingRect.maxY,
+            width: backingRect.width,
+            height: backingRect.height
+        )
+
+        renderer.draw(in: viewport)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        setNeedsRedraw()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+
+        renderer?.layer.contentsScale = window?.backingScaleFactor ?? 1
+        setNeedsRedraw()
     }
 
     /// The area of the view that the guest's display occupies, matching the aspect fit of the layer's contents.
@@ -179,7 +274,18 @@ final class QEMUFramebufferView: NSView {
 
     override func resetCursorRects() {
         guard eventDeliveryMask.allowsMouseEvents, machine != nil else { return }
-        addCursorRect(displayRect, cursor: Self.invisibleCursor)
+        addCursorRect(displayRect, cursor: visibleGuestCursor ?? Self.invisibleCursor)
+    }
+
+    /// The pointer that the guest asked to be shown, at the size it is on the display.
+    private var visibleGuestCursor: NSCursor? {
+        guard isGuestCursorVisible, let guestCursor, framebufferSize.width > 0 else { return nil }
+
+        let scale = displayRect.width / framebufferSize.width
+        let size = NSSize(width: CGFloat(guestCursor.image.width) * scale, height: CGFloat(guestCursor.image.height) * scale)
+        let hotSpot = NSPoint(x: guestCursor.hotSpot.x * scale, y: guestCursor.hotSpot.y * scale)
+
+        return NSCursor(image: NSImage(cgImage: guestCursor.image, size: size), hotSpot: hotSpot)
     }
 
     // MARK: - Window
@@ -192,7 +298,9 @@ final class QEMUFramebufferView: NSView {
         NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
 
         if newWindow == nil {
-            stopObservingFrames()
+            stopObservingDisplay()
+            displayLink?.invalidate()
+            displayLink = nil
         }
     }
 
@@ -203,7 +311,14 @@ final class QEMUFramebufferView: NSView {
 
         guard let window else { return }
 
-        observeFramesIfNeeded()
+        if displayLink == nil {
+            let displayLink = self.displayLink(target: self, selector: #selector(displayLinkFired))
+            displayLink.add(to: .main, forMode: .common)
+            self.displayLink = displayLink
+        }
+
+        observeDisplayIfNeeded()
+        setNeedsRedraw()
 
         NotificationCenter.default.addObserver(self, selector: #selector(windowDidResignKey), name: NSWindow.didResignKeyNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey), name: NSWindow.didBecomeKeyNotification, object: window)

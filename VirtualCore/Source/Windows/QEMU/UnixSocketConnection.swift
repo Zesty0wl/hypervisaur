@@ -114,7 +114,8 @@ final class UnixSocketConnection: @unchecked Sendable {
         return byte
     }
 
-    func write(_ data: Data) throws {
+    /// - Parameter descriptor: A file descriptor that's passed to the peer along with the data, such as for QEMU's `getfd` command.
+    func write(_ data: Data, passing descriptor: OwnedFileDescriptor? = nil) throws {
         writeLock.lock()
         defer { writeLock.unlock() }
 
@@ -122,6 +123,10 @@ final class UnixSocketConnection: @unchecked Sendable {
             guard let base = buffer.baseAddress else { return }
 
             var offset = 0
+            if let descriptor {
+                offset = try SocketControlMessage.send(buffer, passing: [descriptor.rawValue], on: fd)
+            }
+
             while offset < buffer.count {
                 let result = Darwin.write(fd, base.advanced(by: offset), buffer.count - offset)
                 if result >= 0 {
