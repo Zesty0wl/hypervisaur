@@ -30,10 +30,13 @@ public final class QEMUVirtualMachine: ObservableObject {
     private var installDiskURL: URL?
     private var driversDiskURL: URL?
     private var displayAdapter: QEMULaunchConfiguration.DisplayAdapter
+    /// What runs the network, which only sessions that were saved with QEMU's are restored with. See ``QEMUNetwork``.
+    private let network: QEMULaunchConfiguration.Network
     private let logger: Logger
 
     private var qemuProcess: Process?
     private var swtpmProcess: Process?
+    private var networks: QEMUNetwork?
     private var monitor: QMPClient?
     private var display: VNCClient?
     private var clipboardSync: QEMUClipboardSync?
@@ -67,11 +70,18 @@ public final class QEMUVirtualMachine: ObservableObject {
     /// Windows can only switch resolutions with the virtio GPU. The framebuffer it uses before its drivers are installed has a fixed size.
     var canSwitchResolution: Bool { displayAdapter == .virtioGPU }
 
-    init(model: VBVirtualMachine, installDiskURL: URL?, driversDiskURL: URL?, displayAdapter: QEMULaunchConfiguration.DisplayAdapter) {
+    init(
+        model: VBVirtualMachine,
+        installDiskURL: URL?,
+        driversDiskURL: URL?,
+        displayAdapter: QEMULaunchConfiguration.DisplayAdapter,
+        network: QEMULaunchConfiguration.Network = .hypervisaur
+    ) {
         self.model = model
         self.installDiskURL = installDiskURL
         self.driversDiskURL = driversDiskURL
         self.displayAdapter = displayAdapter
+        self.network = network
         self.logger = Logger(subsystem: VirtualCoreConstants.subsystemName, category: "QEMUVirtualMachine(\(model.name))")
     }
 
@@ -244,7 +254,8 @@ public final class QEMUVirtualMachine: ObservableObject {
             monitorSocket: runtimeDirectoryURL.appending(path: "qmp.sock"),
             displaySocket: runtimeDirectoryURL.appending(path: "vnc.sock"),
             tpmSocket: runtimeDirectoryURL.appending(path: "tpm.sock"),
-            agentSocket: runtimeDirectoryURL.appending(path: "agent.sock")
+            agentSocket: runtimeDirectoryURL.appending(path: "agent.sock"),
+            networkSocketsDirectory: runtimeDirectoryURL
         )
 
         var configuration = QEMULaunchConfiguration(
@@ -255,6 +266,7 @@ public final class QEMUVirtualMachine: ObservableObject {
             driversDiskURL: driversDiskURL,
             displayAdapter: displayAdapter
         )
+        configuration.network = network
         configuration.machineType = machineType
         configuration.restoresSavedState = restoration != nil
         configuration.folderSharing = prepareFolderSharing(in: runtimeDirectoryURL)
@@ -262,6 +274,10 @@ public final class QEMUVirtualMachine: ObservableObject {
 
         try launchTPM(toolchain: toolchain, socketURL: paths.tpmSocket)
         try await waitForTPMSocket(at: paths.tpmSocket)
+
+        if network == .hypervisaur {
+            networks = try await QEMUNetwork.start(for: model, toolchain: toolchain, runtimePaths: paths, folderSharing: configuration.folderSharing)
+        }
 
         try launchQEMU(toolchain: toolchain, arguments: arguments)
 
@@ -310,14 +326,16 @@ public final class QEMUVirtualMachine: ObservableObject {
     /// QEMU's arguments for booting this virtual machine as it's set up now, without anything that may change between runs.
     /// See ``QEMULaunchConfiguration/comparableArguments()``.
     func comparableArguments() throws -> [String] {
-        try QEMULaunchConfiguration(
+        var configuration = QEMULaunchConfiguration(
             model: model,
             toolchain: try QEMUToolchain.current(),
             runtimePaths: .placeholder,
             installDiskURL: installDiskURL,
             driversDiskURL: driversDiskURL,
             displayAdapter: displayAdapter
-        ).comparableArguments()
+        )
+        configuration.network = network
+        return try configuration.comparableArguments()
     }
 
     /// Describes how QEMU was started, which restoring the state saved by ``saveState(to:)`` depends on.
@@ -333,6 +351,7 @@ public final class QEMUVirtualMachine: ObservableObject {
             machineType: try await versionedMachineType(monitor: monitor),
             displayAdapter: displayAdapter,
             hasDriversDisk: driversDiskURL != nil,
+            network: network,
             arguments: try comparableArguments()
         )
     }
@@ -732,6 +751,9 @@ public final class QEMUVirtualMachine: ObservableObject {
             swtpmProcess.terminate()
         }
         swtpmProcess = nil
+
+        networks?.stop()
+        networks = nil
 
         if let runtimeDirectoryURL {
             try? FileManager.default.removeItem(at: runtimeDirectoryURL)

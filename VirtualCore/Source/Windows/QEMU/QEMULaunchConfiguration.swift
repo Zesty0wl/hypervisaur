@@ -7,14 +7,30 @@ struct QEMULaunchConfiguration {
         var displaySocket: URL
         var tpmSocket: URL
         var agentSocket: URL
+        /// Where the networks of the virtual machine's network devices listen for QEMU. See ``networkSocket(forDeviceAt:)``.
+        var networkSocketsDirectory: URL
 
         /// Stands in for the sockets' locations, which are different each time QEMU starts.
         static let placeholder = RuntimePaths(
             monitorSocket: URL(fileURLWithPath: "/$RUNTIME/qmp.sock"),
             displaySocket: URL(fileURLWithPath: "/$RUNTIME/vnc.sock"),
             tpmSocket: URL(fileURLWithPath: "/$RUNTIME/tpm.sock"),
-            agentSocket: URL(fileURLWithPath: "/$RUNTIME/agent.sock")
+            agentSocket: URL(fileURLWithPath: "/$RUNTIME/agent.sock"),
+            networkSocketsDirectory: URL(fileURLWithPath: "/$RUNTIME", isDirectory: true)
         )
+
+        func networkSocket(forDeviceAt index: Int) -> URL {
+            networkSocketsDirectory.appending(path: "net\(index).sock")
+        }
+    }
+
+    /// What runs the network that each network device is connected to.
+    enum Network: String, Codable, Equatable, Sendable {
+        /// QEMU's own user networking, which gives the guest the Mac's loopback interface at the host's address.
+        /// Only sessions that were saved with it are restored with it, since the network is part of their state.
+        case qemu
+        /// ``QEMUNetwork``, which runs the same user networking without the Mac's loopback interface.
+        case hypervisaur
     }
 
     enum DisplayAdapter: String, Codable, Equatable, Sendable {
@@ -30,6 +46,7 @@ struct QEMULaunchConfiguration {
     var installDiskURL: URL?
     var driversDiskURL: URL?
     var displayAdapter = DisplayAdapter.framebuffer
+    var network = Network.hypervisaur
     /// The machine type, which is pinned to the version a saved session was saved with when restoring it.
     var machineType = Self.defaultMachineType
     /// Whether QEMU waits for a saved session's state to be loaded through its monitor instead of booting.
@@ -230,10 +247,18 @@ struct QEMULaunchConfiguration {
             }
 
             let netdevID = "net\(index)"
-            var netdev = "user,id=\(netdevID)"
-            /// QEMU runs Samba for each connection that Windows makes to the server's address, on the SMB port.
-            if index == 0, let folderSharing {
-                netdev += ",guestfwd=tcp:\(WindowsFolderSharing.serverAddress):445-cmd:\(folderSharing.serverCommand.qemuOptionEscaped)"
+            let netdev: String
+            switch network {
+            case .qemu:
+                var options = "user,id=\(netdevID)"
+                /// QEMU runs Samba for each connection that Windows makes to the server's address, on the SMB port.
+                if index == 0, let folderSharing {
+                    options += ",guestfwd=tcp:\(WindowsFolderSharing.serverAddress):\(WindowsFolderSharing.serverPort)-cmd:\(folderSharing.serverCommand.qemuOptionEscaped)"
+                }
+                netdev = options
+            case .hypervisaur:
+                /// The network runs Samba for the first device instead. See ``QEMUNetwork``.
+                netdev = "stream,id=\(netdevID),server=off,addr.type=unix,addr.path=\(runtimePaths.networkSocket(forDeviceAt: index).path.qemuOptionEscaped)"
             }
 
             arguments += [

@@ -226,11 +226,45 @@ struct QEMULaunchConfigurationTests {
         #expect(try makeConfiguration(for: vm).comparableArguments() != before)
     }
 
-    @Test func sambaServesSharedFoldersThroughTheFirstNetworkDevice() throws {
+    /// Each network device is connected to Hypervisaur's network for it, which serves the shared folders itself.
+    @Test func networkDevicesConnectToHypervisaursNetworks() throws {
+        var vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        vm.configuration.hardware.networkDevices = [VBNetworkDevice(macAddress: "AA:BB:CC:DD:EE:01"), VBNetworkDevice(macAddress: "AA:BB:CC:DD:EE:02")]
+
+        var configuration = makeConfiguration(for: vm)
+        configuration.folderSharing = WindowsFolderSharing(
+            directoryURL: URL(filePath: "/tmp/vbq-test/samba", directoryHint: .isDirectory),
+            serverURL: URL(filePath: "/opt/homebrew/sbin/samba-dot-org-smbd"),
+            password: "secret",
+            shares: []
+        )
+
+        let arguments = try configuration.arguments()
+
+        #expect(arguments.contains("stream,id=net0,server=off,addr.type=unix,addr.path=/tmp/vbq-test/net0.sock"))
+        #expect(arguments.contains("stream,id=net1,server=off,addr.type=unix,addr.path=/tmp/vbq-test/net1.sock"))
+        #expect(!arguments.contains { $0.hasPrefix("user,") || $0.contains("guestfwd") })
+    }
+
+    /// A session saved with QEMU's own network can only be restored with it, so it isn't the same as one saved with Hypervisaur's.
+    @Test func comparableArgumentsDependOnTheNetwork() throws {
+        let vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+
+        var qemuNetwork = makeConfiguration(for: vm)
+        qemuNetwork.network = .qemu
+
+        #expect(try qemuNetwork.comparableArguments().contains("user,id=net0"))
+        #expect(try qemuNetwork.comparableArguments() != makeConfiguration(for: vm).comparableArguments())
+    }
+
+    @Test func qemusNetworkRunsSambaForTheFirstNetworkDevice() throws {
         let vm = try makeWindowsMachine()
         try createBootDisk(for: vm)
 
         var configuration = makeConfiguration(for: vm)
+        configuration.network = .qemu
         configuration.folderSharing = WindowsFolderSharing(
             directoryURL: URL(filePath: "/tmp/vbq-test,1/samba", directoryHint: .isDirectory),
             serverURL: URL(filePath: "/opt/homebrew/sbin/samba-dot-org-smbd"),
@@ -320,7 +354,8 @@ struct QEMULaunchConfigurationTests {
                 monitorSocket: URL(filePath: "/tmp/vbq-test/qmp.sock"),
                 displaySocket: URL(filePath: "/tmp/vbq-test/vnc.sock"),
                 tpmSocket: URL(filePath: "/tmp/vbq-test/tpm.sock"),
-                agentSocket: URL(filePath: "/tmp/vbq-test/agent.sock")
+                agentSocket: URL(filePath: "/tmp/vbq-test/agent.sock"),
+                networkSocketsDirectory: URL(filePath: "/tmp/vbq-test", directoryHint: .isDirectory)
             ),
             installDiskURL: installDiskURL,
             driversDiskURL: driversDiskURL

@@ -9,6 +9,7 @@ These are installed separately, or downloaded when they're needed, and run as se
 | Software | License | How it's used |
 | --- | --- | --- |
 | [QEMU](https://www.qemu.org) | GPL-2.0 | Runs Windows virtual machines. Installed with Homebrew |
+| [libslirp](https://gitlab.freedesktop.org/slirp/libslirp) | BSD-3-Clause | The network of Windows virtual machines, which `HypervisaurNetwork` runs. Installed with QEMU's Homebrew package. Its public header is included in [HypervisaurNetwork/libslirp](./HypervisaurNetwork/libslirp), with its license |
 | [EDK2 firmware](https://github.com/tianocore/edk2) | BSD-2-Clause-Patent | UEFI firmware for Windows virtual machines, from the QEMU Homebrew package |
 | [swtpm](https://github.com/stefanberger/swtpm) | BSD-3-Clause | TPM for Windows virtual machines. Installed with Homebrew |
 | [wimlib](https://wimlib.net) | GPL-3.0 or LGPL-3.0 | Prepares the Windows installer. Installed with Homebrew |

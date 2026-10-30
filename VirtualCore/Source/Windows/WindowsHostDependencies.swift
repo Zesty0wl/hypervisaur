@@ -216,7 +216,7 @@ public final class WindowsHostDependencies: ObservableObject {
         case .homebrew:
             return true
         case .qemu:
-            return [toolchain.qemuURL, toolchain.firmwareCodeURL, toolchain.firmwareVariablesTemplateURL]
+            return [toolchain.qemuURL, toolchain.firmwareCodeURL, toolchain.firmwareVariablesTemplateURL, toolchain.slirpLibraryURL]
                 .allSatisfy { FileManager.default.fileExists(atPath: $0.path) }
         case .swtpm:
             return FileManager.default.isExecutableFile(atPath: toolchain.swtpmURL.path)
@@ -237,6 +237,8 @@ public struct QEMUToolchain: Sendable {
     public let wimlibURL: URL
     public let firmwareCodeURL: URL
     public let firmwareVariablesTemplateURL: URL
+    /// The user networking library that QEMU's package installs, which ``QEMUNetwork`` runs the virtual machine's network with.
+    public let slirpLibraryURL: URL
 
     public init(homebrew: Homebrew) {
         qemuURL = homebrew.binaryURL(named: "qemu-system-aarch64")
@@ -244,6 +246,7 @@ public struct QEMUToolchain: Sendable {
         wimlibURL = homebrew.binaryURL(named: "wimlib-imagex")
         firmwareCodeURL = homebrew.sharedResourceURL("qemu/edk2-aarch64-code.fd")
         firmwareVariablesTemplateURL = homebrew.sharedResourceURL("qemu/edk2-arm-vars.fd")
+        slirpLibraryURL = homebrew.libraryURL(named: "libslirp.0.dylib")
     }
 
     /// The toolchain installed on this Mac. Throws if something that's needed is missing.
@@ -258,6 +261,7 @@ public struct QEMUToolchain: Sendable {
             (toolchain.qemuURL, "qemu"),
             (toolchain.firmwareCodeURL, "qemu"),
             (toolchain.firmwareVariablesTemplateURL, "qemu"),
+            (toolchain.slirpLibraryURL, "libslirp"),
             (toolchain.swtpmURL, "swtpm"),
             (toolchain.wimlibURL, "wimlib"),
         ]

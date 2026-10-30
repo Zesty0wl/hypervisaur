@@ -144,6 +144,7 @@ Installing takes about 10 minutes. Windows Setup uses a basic 800×600 display; 
 
 - You need your own Windows license. Windows is installed without a product key, so it isn't activated until you activate it.
 - Windows virtual machines use NAT networking and sound output. USB devices aren't available for Windows yet.
+- Windows can reach the internet and your network, but not services that only listen on your Mac's loopback interface (127.0.0.1), such as development servers. QEMU's own networking would let it; Hypervisaur runs Windows' network itself with [libslirp](https://gitlab.freedesktop.org/slirp/libslirp), which comes with QEMU, so that it doesn't. Sessions saved with earlier versions of Hypervisaur resume with QEMU's networking, until Windows next starts.
 - Each shared folder appears in Windows as a network drive named after it, starting at Z:, once you've signed in. The Hypervisaur agent connects the drives for whoever signs in, and they're served by Samba on your Mac, which only the virtual machine can reach. Read-only folders can't be changed from Windows. Folders you add or remove are shared or disconnected the next time the virtual machine starts. If Samba isn't installed yet, the virtual machine's Sharing settings offer to install it.
 - Windows' own display settings don't offer any resolutions with its display driver, so change the resolution from the resolution menu in the window's toolbar, or from Guest › Resolution. See [Resolution and full screen](#resolution-and-full-screen).
 - Save State works for Windows as it does for macOS, except while Windows Setup is running. Windows' sound device can't be saved, so it's disconnected while the state is saved and connected again when Windows resumes. A saved state may not resume after QEMU is updated with Homebrew; Hypervisaur then offers to discard it.
@@ -282,7 +283,7 @@ To build a notarized installer package for release, run `Scripts/release.sh` wit
 
 ## Acknowledgements
 
-Hypervisaur stands on the work of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) and its contributors, and on [QEMU](https://www.qemu.org), [swtpm](https://github.com/stefanberger/swtpm), [wimlib](https://wimlib.net), [Samba](https://www.samba.org), [UTM](https://github.com/utmapp/UTM), the [virtio-win drivers](https://github.com/virtio-win/kvm-guest-drivers-windows), [Homebrew](https://brew.sh), [AppleDB](https://appledb.dev) and the [USB ID Repository](http://www.linux-usb.org/usb-ids.html). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licenses of the software that Hypervisaur includes or uses.
+Hypervisaur stands on the work of [VirtualBuddy](https://github.com/insidegui/VirtualBuddy) and its contributors, and on [QEMU](https://www.qemu.org), [libslirp](https://gitlab.freedesktop.org/slirp/libslirp), [swtpm](https://github.com/stefanberger/swtpm), [wimlib](https://wimlib.net), [Samba](https://www.samba.org), [UTM](https://github.com/utmapp/UTM), the [virtio-win drivers](https://github.com/virtio-win/kvm-guest-drivers-windows), [Homebrew](https://brew.sh), [AppleDB](https://appledb.dev) and the [USB ID Repository](http://www.linux-usb.org/usb-ids.html). See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licenses of the software that Hypervisaur includes or uses.
 
 ## License
 

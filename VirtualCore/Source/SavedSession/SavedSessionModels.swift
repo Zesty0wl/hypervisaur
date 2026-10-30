@@ -260,6 +260,8 @@ struct QEMUSavedSessionDescription: Codable, Hashable, Sendable {
     var displayAdapter: QEMULaunchConfiguration.DisplayAdapter
     /// Whether the drivers disk was attached, which then has to be attached again as it was.
     var hasDriversDisk: Bool
+    /// What ran the network. Sessions saved before Hypervisaur ran it don't have this, and were saved with QEMU's.
+    var network: QEMULaunchConfiguration.Network?
     /// QEMU's arguments, without anything that's allowed to change between runs. See ``QEMULaunchConfiguration/comparableArguments()``.
     var arguments: [String]
 }

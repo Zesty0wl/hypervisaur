@@ -35,6 +35,10 @@ public struct Homebrew: Sendable {
         prefix.appending(path: "bin").appending(path: name)
     }
 
+    public func libraryURL(named name: String) -> URL {
+        prefix.appending(path: "lib").appending(path: name)
+    }
+
     public func sharedResourceURL(_ relativePath: String) -> URL {
         prefix.appending(path: "share").appending(path: relativePath)
     }

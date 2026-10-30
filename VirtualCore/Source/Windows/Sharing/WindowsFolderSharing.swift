@@ -5,8 +5,8 @@ import VirtualWormhole
 /// Shares the Mac's folders with a Windows virtual machine over SMB, using Samba from Homebrew.
 ///
 /// QEMU on the Mac has no virtiofs device, but Windows connects to SMB shares by itself. For each connection that Windows makes
-/// to ``serverAddress``, QEMU's user networking starts Samba with the configuration that this writes to QEMU's runtime
-/// directory. The server is only reachable from the virtual machine, and only runs while Windows is connected to it.
+/// to ``serverAddress``, the virtual machine's network starts Samba with the configuration that this writes to QEMU's runtime
+/// directory. See ``QEMUNetwork``. The server is only reachable from the virtual machine, and only runs while Windows is connected to it.
 ///
 /// Each folder is a share of its own, named after the folder, which Windows shows as a network drive, and which can be
 /// read-only on its own. A single share with a DFS link to each folder's share would show them in one drive, but Samba opens
@@ -15,8 +15,10 @@ import VirtualWormhole
 /// which Samba maps to the Mac's user, with a password that's kept with the virtual machine. The Hypervisaur agent in Windows
 /// connects to the shares with them.
 struct WindowsFolderSharing {
-    /// The address in the virtual machine where the Mac serves its folders, which QEMU's user networking doesn't use for anything else.
+    /// The address in the virtual machine where the Mac serves its folders, which the virtual machine's network doesn't use for anything else.
     static let serverAddress = "10.0.2.4"
+
+    static let serverPort = 445
 
     static let userName = "hypervisaur"
 
@@ -49,7 +51,7 @@ struct WindowsFolderSharing {
 
     var configurationURL: URL { directoryURL.appending(path: "smb.conf") }
 
-    /// What QEMU runs for each connection to the server. Samba serves the connection on its standard input and output.
+    /// What the network runs for each connection to the server. Samba serves the connection on its standard input and output.
     var serverCommand: String {
         [serverURL.path, "--configfile=\(configurationURL.path)"].map(\.shellQuoted).joined(separator: " ")
     }

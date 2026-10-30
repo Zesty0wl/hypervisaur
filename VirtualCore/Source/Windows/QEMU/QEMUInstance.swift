@@ -309,7 +309,13 @@ extension QEMUInstance: VMSessionSavingInstance {
             throw SavedSessionError.missingResource(driversDiskURL.lastPathComponent)
         }
 
-        let machine = QEMUVirtualMachine(model: model, installDiskURL: nil, driversDiskURL: driversDiskURL, displayAdapter: description.displayAdapter)
+        let machine = QEMUVirtualMachine(
+            model: model,
+            installDiskURL: nil,
+            driversDiskURL: driversDiskURL,
+            displayAdapter: description.displayAdapter,
+            network: description.network ?? .qemu
+        )
 
         guard try machine.comparableArguments() == description.arguments else {
             throw SavedSessionError.configurationChanged("Hypervisaur starts Windows virtual machines differently from when this session was saved.")

@@ -183,6 +183,7 @@ final class SavedSessionStorageTests: XCTestCase {
             machineType: "virt-11.1",
             displayAdapter: .virtioGPU,
             hasDriversDisk: true,
+            network: .hypervisaur,
             arguments: ["-machine", "virt", "-name", "$NAME"]
         )
 
@@ -220,6 +221,22 @@ final class SavedSessionStorageTests: XCTestCase {
         let preparation = try storage.prepareRestore()
         XCTAssertEqual(preparation.stateFileURL.lastPathComponent, SavedSessionLayout.qemuStateFileName)
         XCTAssertEqual(try readWorking("EFIVariables.fd"), Data("variables".utf8), "the firmware's variables belong with the saved state")
+    }
+
+    /// Sessions saved before Hypervisaur ran the network were saved with QEMU's, and don't say so.
+    func testQEMUSessionsSavedBeforeTheNetworkWasRecordedHaveNoNetwork() throws {
+        let manifest: [String: Any] = [
+            "qemuVersion": "11.1.2",
+            "machineType": "virt-11.1",
+            "displayAdapter": "virtioGPU",
+            "hasDriversDisk": true,
+            "arguments": ["-machine", "virt"],
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: manifest, format: .binary, options: 0)
+
+        let description = try PropertyListDecoder().decode(QEMUSavedSessionDescription.self, from: data)
+
+        XCTAssertNil(description.network)
     }
 
     func testCaptureClonesAreIndependentFromWorkingFiles() throws {

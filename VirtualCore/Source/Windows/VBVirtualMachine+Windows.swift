@@ -79,6 +79,8 @@ public extension VBVirtualMachine {
 
     var swtpmLogURL: URL { metadataDirectoryURL.appending(path: "swtpm.log") }
 
+    var networkLogURL: URL { metadataDirectoryURL.appending(path: "network.log") }
+
     static let windowsBootManagerDescription = "Windows Boot Manager"
 
     /// Windows Setup adds its boot manager to the firmware's boot options once Windows has been copied to the disk,

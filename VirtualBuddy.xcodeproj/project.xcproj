@@ -250,7 +250,9 @@
           ],
         },
       ],
-    }, {
+    },
+    { "kind": "folder", "path": "HypervisaurNetwork", "target-membership": [ "HypervisaurNetwork" ] },
+    {
       "kind": "group",
       "name": "Products",
       "children": [
@@ -325,6 +327,7 @@
         },
         { "path": "<PRODUCTS>/VirtualInstallationService.xpc", "id": "F4EFB5B42FDB2BD300AF2A63", "type": "wrapper.xpc-service", "index": false, "target-membership": [ { "build-phase": "VirtualBuddy/copy/Embed XPC Services", "header-preservation": "remove-on-copy" } ] },
         { "path": "<PRODUCTS>/VirtualCoreTests.xctest", "id": "F4513910306FBC2A0019C02D", "type": "wrapper.cfbundle", "index": false },
+        { "path": "<PRODUCTS>/HypervisaurNetwork", "id": "EA414ABB3095128B00550B82", "type": "compiled.mach-o.executable", "index": false, "target-membership": [ { "build-phase": "VirtualBuddy/copy/Embed Network Helper", "code-sign-on-copy": true } ] },
       ],
     }, {
       "kind": "group",
@@ -408,6 +411,7 @@
         "VirtualBuddyGuest",
         "VirtualInstallation",
         "VirtualInstallationService",
+        "HypervisaurNetwork",
       ],
       "build-phases": [
         "compile-sources",
@@ -453,6 +457,11 @@
           "name": "Embed XPC Services",
           "bundle-base-path": "build-products-directory",
           "relative-path": "$(CONTENTS_FOLDER_PATH)/XPCServices",
+        }, {
+          "kind": "copy",
+          "name": "Embed Network Helper",
+          "bundle-base-path": "build-products-directory",
+          "relative-path": "$(CONTENTS_FOLDER_PATH)/MacOS",
         },
       ],
       "package-product-members": [
@@ -1019,6 +1028,33 @@
         "CODE_SIGN_STYLE": "Automatic",
         "DEVELOPMENT_TEAM": "8352865GK4",
         "PRODUCT_NAME": "$(TARGET_NAME)",
+      },
+    }, {
+      "name": "HypervisaurNetwork",
+      "id": "EA414ABA3095128B00550B82",
+      "product": "Products/HypervisaurNetwork",
+      "product-type": "tool",
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+      ],
+      "build-settings": {
+        "CODE_SIGN_ENTITLEMENTS": "HypervisaurNetwork/HypervisaurNetwork.entitlements",
+        "CODE_SIGN_STYLE": "Automatic",
+        "CREATE_INFOPLIST_SECTION_IN_BINARY": "YES",
+        "DEVELOPMENT_TEAM": "8352865GK4",
+        "ENABLE_HARDENED_RUNTIME": "YES",
+        "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
+        "GCC_C_LANGUAGE_STANDARD": "gnu17",
+        "GCC_TREAT_WARNINGS_AS_ERRORS": "YES",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "PRODUCT_BUNDLE_IDENTIFIER": "$(VIRTUALBUDDY_BUNDLE_ID).HypervisaurNetwork",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SKIP_INSTALL": "YES",
+        "WARNING_CFLAGS": [
+          "-Wall",
+          "-Wextra",
+        ],
       },
     },
   ],
