@@ -49,6 +49,22 @@ public extension NSImage {
 }
 
 public extension CGImage {
+    /// Decodes image data no larger than `maxPixelSize` on its longest side, whatever size or resolution it declares, for
+    /// images that come from somewhere that isn't trusted, such as a guest.
+    static func vb_thumbnail(from data: Data, maxPixelSize: Int = 1024) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0 else { return nil }
+
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ] as CFDictionary
+
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options), image.width > 0, image.height > 0 else { return nil }
+        return image
+    }
+
     // TODO: Adopt BuddyImageKit
     func vb_heicEncodedData(options: CFDictionary = NSImage.defaultHEICProperties) throws -> Data {
         guard let cfData = CFDataCreateMutable(kCFAllocatorDefault, 0) else {

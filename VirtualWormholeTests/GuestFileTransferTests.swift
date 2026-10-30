@@ -193,6 +193,48 @@ struct GuestFileTransferTests {
         #expect(error is CancellationError)
     }
 
+    @Test(arguments: [GuestAgentFrame.transferWindow * 4, UInt64.max])
+    func acknowledgementsBeyondWhatWasSentDontStopTheTransfer(acknowledgedBytes: UInt64) async throws {
+        let source = try TemporaryFolder()
+        let file = try source.file("Large.bin", randomData(Int(GuestAgentFrame.transferWindow) + GuestAgentFrame.fileChunkSize * 4))
+        let sender = try GuestFileSender(urls: [file])
+
+        let sentBytes = LockedBox(0)
+        let outcome = LockedBox<Result<Void, Error>?>(nil)
+
+        let thread = Thread {
+            do {
+                try sender.send { kind, payload in
+                    if kind == .fileData { sentBytes.withValue { $0 += payload.count } }
+                }
+                outcome.withValue { $0 = .success(()) }
+            } catch {
+                outcome.withValue { $0 = .failure(error) }
+            }
+        }
+        thread.start()
+
+        /// The sender fills the window, then waits for the acknowledgement that wakes it.
+        let clock = ContinuousClock()
+        var deadline = clock.now + .seconds(5)
+        while sentBytes.value < Int(GuestAgentFrame.transferWindow), clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        sender.acknowledge(acknowledgedBytes)
+
+        deadline = clock.now + .seconds(5)
+        while outcome.value == nil, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        guard case .success = outcome.value else {
+            Issue.record("The transfer should have finished, not \(String(describing: outcome.value)).")
+            sender.cancel()
+            return
+        }
+        #expect(sentBytes.value == Int(sender.size.totalBytes))
+    }
+
     @Test func dragItemsSurviveEncodingAndDecoding() {
         let items = [
             GuestDragItem(isFolder: false, path: #"C:\Users\neil\Desktop\Report.pdf"#),

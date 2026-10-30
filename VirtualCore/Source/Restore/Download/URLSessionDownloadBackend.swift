@@ -44,6 +44,26 @@ public final class URLSessionDownloadBackend: NSObject, ObservableObject, Downlo
 
     private var destinationURL: URL?
 
+    /// Where a download from `url` is saved, which is always directly in the downloads folder: the link's file name is used
+    /// when it's a plain name, and otherwise a name is made up, since the server or whoever chose the link decides it.
+    static func destinationURL(forDownloadFrom url: URL, in downloadsURL: URL) -> URL? {
+        let downloadsURL = downloadsURL.standardizedFileURL
+        let name = url.lastPathComponent
+        let isPlainName = !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains(":") && !name.contains("\0")
+
+        let filename: String
+        if isPlainName {
+            filename = name
+        } else {
+            let pathExtension = url.pathExtension.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+            filename = UUID().uuidString + "." + (pathExtension.isEmpty ? "download" : pathExtension)
+        }
+
+        let destinationURL = downloadsURL.appendingPathComponent(filename, isDirectory: false).standardizedFileURL
+        guard destinationURL.deletingLastPathComponent().path == downloadsURL.path else { return nil }
+        return destinationURL
+    }
+
     @MainActor
     public func startDownload(with url: URL) {
         logger.debug("Start download from \(url.absoluteString.quoted)")
@@ -54,9 +74,11 @@ public final class URLSessionDownloadBackend: NSObject, ObservableObject, Downlo
 
         state = .downloading(nil)
 
-        let filename = url.lastPathComponent
-
-        self.destinationURL = VBSettings.current.downloadsDirectoryURL.appendingPathComponent(filename)
+        guard let destinationURL = Self.destinationURL(forDownloadFrom: url, in: VBSettings.current.downloadsDirectoryURL) else {
+            state = .failed("The download link doesn’t name a file that can be saved in the downloads folder.")
+            return
+        }
+        self.destinationURL = destinationURL
 
         var request = URLRequest(url: url)
 

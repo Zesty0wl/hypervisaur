@@ -209,10 +209,11 @@ public final class GuestFileSender: @unchecked Sendable {
         self.size = GuestTransferSize(totalBytes: totalBytes, itemCount: UInt32(items.count))
     }
 
-    /// Records the receiver's acknowledgement, which lets more data be sent.
+    /// Records the receiver's acknowledgement, which lets more data be sent. The receiver can't acknowledge more than the
+    /// transfer holds, whatever it claims.
     public func acknowledge(_ bytes: UInt64) {
         condition.withLock {
-            acknowledgedBytes = max(acknowledgedBytes, bytes)
+            acknowledgedBytes = max(acknowledgedBytes, min(bytes, size.totalBytes))
             condition.broadcast()
         }
     }
@@ -267,7 +268,9 @@ public final class GuestFileSender: @unchecked Sendable {
         condition.lock()
         defer { condition.unlock() }
 
-        while !isCancelled, sentBytes + length - acknowledgedBytes > GuestAgentFrame.transferWindow {
+        while !isCancelled {
+            let pending = sentBytes + length
+            guard pending > acknowledgedBytes, pending - acknowledgedBytes > GuestAgentFrame.transferWindow else { break }
             condition.wait()
         }
         if isCancelled { throw CancellationError() }

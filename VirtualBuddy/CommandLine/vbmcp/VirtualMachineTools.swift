@@ -140,7 +140,7 @@ enum VirtualMachineTools {
         inputSchema: schema([
             "name": property("string", "The name of the virtual machine."),
             "max_size": property("integer", "The most pixels the image may have on its longer side; larger screenshots are scaled down. Defaults to \(Screenshots.defaultMaximumSize)."),
-            "save_path": property("string", "A path to also save the screenshot to as a PNG file, at its full size."),
+            "save_path": property("string", "A path ending in .png to also save the screenshot to, at its full size. A file already at the path is replaced; anything else there, such as a folder, isn’t."),
         ], required: ["name"]),
         result: { arguments, progress in
             let model = try Library.machine(named: try arguments.requiredString("name"))
@@ -582,6 +582,10 @@ private enum Screenshots {
     static let timeout = Duration.seconds(120)
 
     static func take(of model: VBVirtualMachine, maximumSize: Int, savingTo saveURL: URL?, progress: @escaping MCPTool.ProgressHandler) async throws -> MCPToolResult {
+        if let saveURL, saveURL.pathExtension.lowercased() != "png" {
+            throw Failure("The path to save the screenshot to must end in .png.")
+        }
+
         let replyID = UUID()
         let attachmentURL = AutomationReply.attachmentURL(for: replyID, pathExtension: "png")
         defer { try? FileManager.default.removeItem(at: attachmentURL) }
@@ -598,8 +602,7 @@ private enum Screenshots {
         var text = reply.message ?? "Took a screenshot of \(model.name)."
 
         if let saveURL {
-            try? FileManager.default.removeItem(at: saveURL)
-            try FileManager.default.copyItem(at: attachmentURL, to: saveURL)
+            try FileManager.default.replaceRegularFile(at: saveURL, with: try Data(contentsOf: attachmentURL))
             text += " Saved it to \(saveURL.path)."
         }
 

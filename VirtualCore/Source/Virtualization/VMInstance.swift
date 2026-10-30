@@ -288,11 +288,13 @@ public final class VMInstance: NSObject, ObservableObject {
         session.onNotification = { [weak self] name in
             self?.logger.debug("Guest system notification: \(name, privacy: .public)")
         }
+        /// The picture comes from the guest, so it's decoded at a bounded size and saved as that, rather than as the bytes it sent.
         session.onDesktopPicture = { [weak self] picture in
-            guard let self, let image = NSImage(data: picture.content) else { return }
+            guard let self, let thumbnail = CGImage.vb_thumbnail(from: picture.content) else { return }
+            let image = NSImage(cgImage: thumbnail, size: NSSize(width: thumbnail.width, height: thumbnail.height))
             do {
                 let url = self.virtualMachineModel.metadataFileURL(VBVirtualMachine.thumbnailFileName)
-                try picture.content.write(to: url, options: .atomic)
+                try thumbnail.vb_heicEncodedData(options: NSImage.defaultThumbnailProperties).write(to: url, options: .atomic)
                 if let hash = image.blurHash(numberOfComponents: (Int.vbBlurHashSize, Int.vbBlurHashSize)) {
                     self.virtualMachineModel.metadata.backgroundHash = BlurHashToken(value: hash, size: .vbBlurHashSize)
                 }

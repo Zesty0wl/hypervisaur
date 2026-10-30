@@ -6,21 +6,28 @@ public extension NSImage {
         draw(in: CGRect(origin: point, size: size))
     }
 
+    /// The longest side of the image the hash is computed from. A blur hash only has a few components, so a small image gives
+    /// the same result, and the work doesn't depend on the size the image claims to be.
+    static let blurHashMaximumPixelSize: CGFloat = 64
+
     func blurHash(numberOfComponents components: (Int, Int)) -> String? {
-        let scale: CGFloat = 1.0
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
 
-		let pixelWidth = Int(round(size.width * scale))
-		let pixelHeight = Int(round(size.height * scale))
+        let scale = min(1, Self.blurHashMaximumPixelSize / max(size.width, size.height))
 
-		let context = CGContext(
+		let pixelWidth = max(1, Int(round(size.width * scale)))
+		let pixelHeight = max(1, Int(round(size.height * scale)))
+
+		guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+		      let context = CGContext(
 			data: nil,
 			width: pixelWidth,
 			height: pixelHeight,
 			bitsPerComponent: 8,
 			bytesPerRow: pixelWidth * 4,
-			space: CGColorSpace(name: CGColorSpace.sRGB)!,
+			space: space,
 			bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-		)!
+		) else { return nil }
 		context.scaleBy(x: scale, y: -scale)
 		context.translateBy(x: 0, y: -size.height)
 

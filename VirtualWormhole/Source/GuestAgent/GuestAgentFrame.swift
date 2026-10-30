@@ -111,25 +111,30 @@ public struct GuestAgentFrameDecoder: Sendable {
 
     /// Adds bytes that were received and returns the frames that are now complete. Frames of kinds that aren't known are
     /// skipped, so that newer agents can add them.
+    ///
+    /// The decoded frames are removed from the buffer once, at the end, so that a batch of many frames takes time in
+    /// proportion to its size.
     public mutating func decode(_ data: Data) throws -> [GuestAgentFrame] {
         buffer.append(data)
 
         var frames = [GuestAgentFrame]()
-        while buffer.count >= GuestAgentFrame.headerSize {
-            let start = buffer.startIndex
-            let length = Int(buffer.littleEndianUInt32(at: start))
+        var offset = buffer.startIndex
+        defer { buffer.removeSubrange(buffer.startIndex..<offset) }
+
+        while buffer.endIndex - offset >= GuestAgentFrame.headerSize {
+            let length = Int(buffer.littleEndianUInt32(at: offset))
 
             guard length <= GuestAgentFrame.maximumPayloadSize else {
                 throw GuestAgentError("The guest agent sent a message that's too large (\(length) bytes).")
             }
 
             let frameSize = GuestAgentFrame.headerSize + length
-            guard buffer.count >= frameSize else { break }
+            guard buffer.endIndex - offset >= frameSize else { break }
 
-            let kindValue = buffer[start + 4]
-            let channel = buffer.littleEndianUInt32(at: start + 5)
-            let payload = Data(buffer[(start + GuestAgentFrame.headerSize)..<(start + frameSize)])
-            buffer.removeSubrange(start..<(start + frameSize))
+            let kindValue = buffer[offset + 4]
+            let channel = buffer.littleEndianUInt32(at: offset + 5)
+            let payload = Data(buffer[(offset + GuestAgentFrame.headerSize)..<(offset + frameSize)])
+            offset += frameSize
 
             if let kind = GuestAgentFrame.Kind(rawValue: kindValue) {
                 frames.append(GuestAgentFrame(kind, channel: channel, payload: payload))

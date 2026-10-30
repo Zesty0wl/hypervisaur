@@ -4,6 +4,9 @@ import VirtualWormhole
 /// Carries the agent's frames with the guest app's other messages, for macOS guests, whose agent is part of the guest app.
 final class GuestAppAgentTransport: GuestAgentTransport, @unchecked Sendable {
     private let lock = NSLock()
+    /// Frames from the guest are decoded on a queue of their own rather than the main actor that delivers them, since the
+    /// guest decides how many arrive at once. The queue is serial, which keeps them in order.
+    private let receiveQueue = DispatchQueue(label: "GuestAppAgentTransport.receive")
     private var decoder = GuestAgentFrameDecoder()
     private var onFrame: (@Sendable (GuestAgentFrame) -> Void)?
     private var onClose: (@Sendable (Error?) -> Void)?
@@ -42,16 +45,19 @@ final class GuestAppAgentTransport: GuestAgentTransport, @unchecked Sendable {
     }
 
     private func receive(_ data: Data) {
-        let (frames, onFrame) = lock.withLock { () -> ([GuestAgentFrame], (@Sendable (GuestAgentFrame) -> Void)?) in
-            do {
-                return (try decoder.decode(data), self.onFrame)
-            } catch {
-                decoder = GuestAgentFrameDecoder()
-                return ([], self.onFrame)
+        receiveQueue.async { [weak self] in
+            guard let self else { return }
+            let (frames, onFrame) = lock.withLock { () -> ([GuestAgentFrame], (@Sendable (GuestAgentFrame) -> Void)?) in
+                do {
+                    return (try self.decoder.decode(data), self.onFrame)
+                } catch {
+                    self.decoder = GuestAgentFrameDecoder()
+                    return ([], self.onFrame)
+                }
             }
-        }
-        for frame in frames {
-            onFrame?(frame)
+            for frame in frames {
+                onFrame?(frame)
+            }
         }
     }
 }

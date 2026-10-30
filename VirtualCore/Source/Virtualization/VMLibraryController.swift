@@ -573,12 +573,19 @@ public extension VMLibraryController {
         guard name.count >= 3 else {
             throw Failure("Name must be at least 3 characters long.")
         }
+        /// Names also come from deep links and `vbmcp`, so they're checked here, where they become a location in the library.
+        guard !name.contains("/"), !name.contains(":"), !name.contains("\0"), !name.hasPrefix(".") else {
+            throw Failure("Names can’t contain slashes or colons, or start with a period.")
+        }
 
-        let newURL = vm
-            .bundleURL
-            .deletingLastPathComponent()
+        let directoryURL = vm.bundleURL.deletingLastPathComponent()
+        let newURL = directoryURL
             .appendingPathComponent(name)
             .appendingPathExtension(VBVirtualMachine.bundleExtension)
+
+        guard newURL.standardizedFileURL.deletingLastPathComponent().path == directoryURL.standardizedFileURL.path else {
+            throw Failure("Names can’t contain slashes or colons, or start with a period.")
+        }
 
         guard !fileManager.fileExists(atPath: newURL.path) else {
             throw Failure("Another virtual machine is already using this name, please choose another one.")

@@ -37,6 +37,42 @@ struct GuestAgentFrameTests {
         #expect(try decoder.decode(unknown + known.encoded()) == [known])
     }
 
+    @Test func framesSplitAcrossManyReadsDecodeTheSame() throws {
+        let frames = (0..<500).map { index in
+            GuestAgentFrame(index.isMultiple(of: 3) ? .input : .output, channel: UInt32(index % 7), payload: Data(repeating: UInt8(index % 256), count: index % 97))
+        }
+        let stream = frames.reduce(Data()) { $0 + $1.encoded() }
+
+        var decoder = GuestAgentFrameDecoder()
+        var decoded = [GuestAgentFrame]()
+        var offset = stream.startIndex
+        var chunkSize = 1
+        while offset < stream.endIndex {
+            let end = min(offset + chunkSize, stream.endIndex)
+            decoded += try decoder.decode(stream[offset..<end])
+            offset = end
+            chunkSize = chunkSize % 41 + 13
+        }
+
+        #expect(decoded == frames)
+    }
+
+    /// A guest can send a single batch packed with empty frames, which mustn't take time out of proportion to its size.
+    @Test func largeBatchesOfSmallFramesDecodeQuickly() throws {
+        var unknown = GuestAgentFrame(.output, channel: 0).encoded()
+        unknown[4] = 0xFF
+        let batch = Data((0..<500_000).map { _ in unknown }.joined())
+
+        var decoder = GuestAgentFrameDecoder()
+        let clock = ContinuousClock()
+        let start = clock.now
+        let frames = try decoder.decode(batch)
+        let elapsed = clock.now - start
+
+        #expect(frames.isEmpty)
+        #expect(elapsed < .seconds(2))
+    }
+
     @Test func oversizedFramesAreRejected() {
         let length = UInt32(GuestAgentFrame.maximumPayloadSize + 1)
         let header = Data([UInt8(length & 0xFF), UInt8(length >> 8 & 0xFF), UInt8(length >> 16 & 0xFF), UInt8(length >> 24), GuestAgentFrame.Kind.output.rawValue, 1, 0, 0, 0])
