@@ -13,7 +13,7 @@ enum WindowsDriversDisk {
     static let setupVersionFileName = "Setup.version"
 
     /// Changes whenever the scripts on the disk change, so that disks with older scripts are created again.
-    private static let layoutVersion = 8
+    private static let layoutVersion = 9
 
     static var contentsVersion: String { "\(WindowsDrivers.contentsVersion)/\(layoutVersion)/\(WindowsDrivers.bundledProgramsDigest)" }
 
@@ -23,7 +23,9 @@ enum WindowsDriversDisk {
     ///
     /// The SPICE agent's service starts the agent in each session that's signed in. The Hypervisaur agent is a service of its own,
     /// which starts again if it stops. Both are stopped while they're replaced, and the SPICE agent's licenses and sources are
-    /// installed with it. The tasks run as the system account, so that no window appears when they run.
+    /// installed with it. The tasks run as the system account, so that no window appears when they run. The status script they
+    /// run, and the version of the setup that last ran, are kept in Program Files, where only administrators and the system
+    /// can make or change files. Earlier versions kept them in ProgramData, where users can make folders.
     ///
     /// Fast Startup is turned off, because Hypervisaur replaces this disk while Windows is shut down. With Fast Startup, Windows
     /// resumes with the disk as it was when it shut down, so it doesn't see what's changed, and can write its old view of the
@@ -58,12 +60,13 @@ enum WindowsDriversDisk {
         net start HypervisaurAgent >nul 2>&1
     )
 
-    set "StatusScript=%ProgramData%\\Hypervisaur\\\(statusScriptName)"
-    mkdir "%ProgramData%\\Hypervisaur" 2>nul
+    set "StatusFolder=%ProgramFiles%\\Hypervisaur"
+    set "StatusScript=%StatusFolder%\\\(statusScriptName)"
+    mkdir "%StatusFolder%" 2>nul
     copy /y "%~dp0\(statusScriptName)" "%StatusScript%" >nul
-    copy /y "%~dp0\(setupVersionFileName)" "%ProgramData%\\Hypervisaur\\\(setupVersionFileName)" >nul
-    schtasks /create /f /tn "Hypervisaur\\Started" /sc onstart /ru SYSTEM /tr "%StatusScript% startup" >nul
-    schtasks /create /f /tn "Hypervisaur\\Signed In" /sc onlogon /ru SYSTEM /tr "%StatusScript%" >nul
+    copy /y "%~dp0\(setupVersionFileName)" "%StatusFolder%\\\(setupVersionFileName)" >nul
+    schtasks /create /f /tn "Hypervisaur\\Started" /sc onstart /ru SYSTEM /tr "\\"%StatusScript%\\" startup" >nul
+    schtasks /create /f /tn "Hypervisaur\\Signed In" /sc onlogon /ru SYSTEM /tr "\\"%StatusScript%\\"" >nul
 
     exit /b 0
 
@@ -77,6 +80,9 @@ enum WindowsDriversDisk {
     /// 30 seconds. The setup script replaces this script while it runs, which is safe because Windows reads the whole of
     /// a parenthesized block before running it, and nothing after the block is read again.
     ///
+    /// The setup script runs as the system, so the agent finds the drivers disk: it's the removable volume named DRIVERS
+    /// that can't be written to, rather than any drive with a setup script, since users can write to other drives.
+    ///
     /// Windows Setup signs in to a temporary account to finish setting up, so the script also waits for Setup to have
     /// finished, and ignores that account's desktop. `timeout` doesn't work without a console, so `ping` waits between checks.
     static let statusScript = """
@@ -86,9 +92,9 @@ enum WindowsDriversDisk {
     if /i "%~1"=="startup" (
         set "DriversChecked="
         for /l %%i in (1,1,15) do if not defined DriversChecked (
-            for %%d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do if not defined DriversChecked if exist "%%d:\\\(driversFolderName)\\\(setupVersionFileName)" (
+            for /f "delims=" %%d in ('""%~dp0Agent\\HypervisaurAgent.exe" drivers"') do if not defined DriversChecked (
                 set "DriversChecked=1"
-                fc /b "%%d:\\\(driversFolderName)\\\(setupVersionFileName)" "%ProgramData%\\Hypervisaur\\\(setupVersionFileName)" >nul 2>&1 || call "%%d:\\\(driversFolderName)\\\(setupScriptName)"
+                fc /b "%%d\\\(driversFolderName)\\\(setupVersionFileName)" "%~dp0\(setupVersionFileName)" >nul 2>&1 || call "%%d\\\(driversFolderName)\\\(setupScriptName)"
             )
             if not defined DriversChecked ping -n 3 127.0.0.1 >nul
         )

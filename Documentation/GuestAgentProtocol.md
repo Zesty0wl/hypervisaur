@@ -70,6 +70,8 @@ If anything fails, or the Mac sends `terminate`, the agent removes the hidden fo
 
 The desktop is the one of the user signed in at the guest's display: on Windows, the user of the active console session, and on Linux, the user of the active graphical session on seat0. The agent replies `failed` if nobody is signed in.
 
+The Windows agent runs as the system, so it acts as the user whose desktop it is, with their token, while it uses files there. The user can point their desktop anywhere, or replace a folder in it with a link, even during a transfer, so this way it can only put files where the user could themselves.
+
 On Linux, the desktop is the folder that the user's `~/.config/user-dirs.dirs` names, or `~/Desktop`, and it must be inside their home folder. See version 5 for how the agent, which runs as root, works there.
 
 ### Getting files from the guest
@@ -77,6 +79,8 @@ On Linux, the desktop is the folder that the user's `~/.config/user-dirs.dirs` n
 1. The Mac sends `getFiles` with the paths.
 2. The agent replies `transferSize`, then each item's `fileHeader` and `fileData`, then `filesEnd`, with each path's last component as its top-level item. It sends nothing else on the channel afterwards.
 3. The Mac acknowledges the data as it writes it. `terminate` stops the agent sending, without a reply.
+
+The paths come from drags in the session of the user signed in at the guest's display, which programs that user runs choose. So the Windows agent reads the files as that user, with their token, and replies `failed` if nobody is signed in or the user can't read one of them.
 
 ### Dragging out of the guest
 

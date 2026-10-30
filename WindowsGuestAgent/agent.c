@@ -18,13 +18,18 @@
 #endif
 
 #include <windows.h>
+#include <aclapi.h>
+#include <bcrypt.h>
 #include <ole2.h>
+#include <sddl.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <userenv.h>
 #include <wincred.h>
 #include <winnetwk.h>
 #include <wtsapi32.h>
+#include <fcntl.h>
+#include <io.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -176,27 +181,138 @@ static const IID dropTargetInterface = { 0x00000122, 0x0000, 0x0000, { 0xc0, 0x0
 static SERVICE_STATUS_HANDLE statusHandle;
 static SERVICE_STATUS serviceStatus;
 
+/* MARK: - Private files */
+
+/*
+ * The agent runs as the system, but standard users can make files and folders in some of the places it uses, such as ProgramData
+ * and the system's temporary folder, and then change them. So what the agent makes there is only for the system and administrators,
+ * and what it finds there is only used if one of them made it.
+ */
+
+/* Files that only the system, administrators and the file's owner can use. The owner is the agent's own user in the `console` mode. */
+#define PRIVATE_FILE_SDDL L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)"
+
+/* Folders that only the system and administrators can use, with everything in them. */
+#define PRIVATE_FOLDER_SDDL L"D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+
+/* Makes attributes with the security descriptor in SDDL, which the caller frees with LocalFree(attributes->lpSecurityDescriptor). */
+static BOOL makeSecurityAttributes(const wchar_t *sddl, SECURITY_ATTRIBUTES *attributes) {
+    attributes->nLength = sizeof(*attributes);
+    attributes->bInheritHandle = FALSE;
+    attributes->lpSecurityDescriptor = NULL;
+    return ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, SDDL_REVISION_1, &attributes->lpSecurityDescriptor, NULL);
+}
+
+/* Whether an open file or folder belongs to the system or administrators, rather than to a user who could change it. */
+static BOOL isOwnedBySystem(HANDLE handle) {
+    PSID owner = NULL;
+    PSECURITY_DESCRIPTOR descriptor = NULL;
+    if (GetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &owner, NULL, NULL, NULL, &descriptor) != ERROR_SUCCESS) return FALSE;
+
+    BOOL isOwned = IsWellKnownSid(owner, WinLocalSystemSid) || IsWellKnownSid(owner, WinBuiltinAdministratorsSid);
+    LocalFree(descriptor);
+    return isOwned;
+}
+
+/*
+ * Makes a folder that only the system and administrators can use, or makes the one that's there already private. One that's
+ * there already is only used if it's a folder rather than a link, and belongs to the system or administrators: a standard user
+ * may have made it, and would still be able to change it. Folders that earlier versions of the agent made let users add files
+ * to them, which they can't once they're private.
+ */
+static BOOL preparePrivateFolder(const wchar_t *path) {
+    SECURITY_ATTRIBUTES attributes;
+    if (!makeSecurityAttributes(PRIVATE_FOLDER_SDDL, &attributes)) return FALSE;
+
+    BOOL isPrepared = CreateDirectoryW(path, &attributes);
+    if (!isPrepared && GetLastError() == ERROR_ALREADY_EXISTS) {
+        HANDLE folder = CreateFileW(path, READ_CONTROL | WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (folder != INVALID_HANDLE_VALUE) {
+            BY_HANDLE_FILE_INFORMATION information;
+            PACL dacl = NULL;
+            BOOL hasDACL = FALSE, isDefaulted = FALSE;
+            isPrepared = GetFileInformationByHandle(folder, &information)
+                && (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                && isOwnedBySystem(folder)
+                && GetSecurityDescriptorDacl(attributes.lpSecurityDescriptor, &hasDACL, &dacl, &isDefaulted)
+                && SetSecurityInfo(folder, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, dacl, NULL) == ERROR_SUCCESS;
+            CloseHandle(folder);
+        }
+    }
+
+    LocalFree(attributes.lpSecurityDescriptor);
+    return isPrepared;
+}
+
 /* MARK: - Logging */
 
 static CRITICAL_SECTION logLock;
 static FILE *logFile;
 
+/*
+ * Opens the log in a private folder, without following links. It's started afresh when it gets large, so that it can't fill
+ * the disk, and when it isn't a file that the system or administrators made.
+ *
+ * The file is checked through a handle that can delete it, and is then opened again from that handle to append to it, since
+ * programs can only read a file that's open for deleting if they let it be deleted, and most don't. Only the system and
+ * administrators can open anything in the folder, so the log lets them do anything with it while the agent has it open.
+ */
+static HANDLE openLogFile(const wchar_t *path) {
+    const DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    HANDLE file = CreateFileW(path, FILE_APPEND_DATA | READ_CONTROL | DELETE | SYNCHRONIZE, sharing, NULL, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        BY_HANDLE_FILE_INFORMATION information;
+        BOOL isUsable = GetFileInformationByHandle(file, &information)
+            && !(information.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
+            && information.nNumberOfLinks == 1
+            && information.nFileSizeHigh == 0 && information.nFileSizeLow <= 1024 * 1024
+            && isOwnedBySystem(file);
+        if (isUsable) {
+            HANDLE log = ReOpenFile(file, FILE_APPEND_DATA | SYNCHRONIZE, sharing, 0);
+            CloseHandle(file);
+            return log;
+        }
+
+        FILE_DISPOSITION_INFO disposition = { TRUE };
+        BOOL isRemoved = SetFileInformationByHandle(file, FileDispositionInfo, &disposition, sizeof(disposition));
+        CloseHandle(file);
+        if (!isRemoved) return INVALID_HANDLE_VALUE;
+    }
+    return CreateFileW(path, FILE_APPEND_DATA | SYNCHRONIZE, sharing, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+}
+
+/*
+ * The log is in the agent's folder in ProgramData, which is private. The agent doesn't log if a standard user made the folder,
+ * since they could change what's in it.
+ */
 static void openLog(void) {
     wchar_t path[MAX_PATH];
     DWORD length = GetEnvironmentVariableW(L"ProgramData", path, MAX_PATH);
     if (length == 0 || length >= MAX_PATH - 40) return;
 
     wcscat(path, L"\\Hypervisaur");
-    CreateDirectoryW(path, NULL);
-    wcscat(path, L"\\Agent.log");
+    if (!preparePrivateFolder(path)) return;
 
-    /* The log is started afresh when it gets large, so that it can't fill the disk. */
-    WIN32_FILE_ATTRIBUTE_DATA attributes;
-    const wchar_t *mode = L"a";
-    if (GetFileAttributesExW(path, GetFileExInfoStandard, &attributes) && attributes.nFileSizeLow > 1024 * 1024) {
-        mode = L"w";
+    /* Earlier versions kept the status script and the version of the setup that last ran here. They're kept with the agent in Program Files now. */
+    size_t folderLength = wcslen(path);
+    wcscat(path, L"\\Status.cmd");
+    DeleteFileW(path);
+    wcscpy(path + folderLength, L"\\Setup.version");
+    DeleteFileW(path);
+
+    wcscpy(path + folderLength, L"\\Agent.log");
+    HANDLE file = openLogFile(path);
+    if (file == INVALID_HANDLE_VALUE) return;
+
+    int descriptor = _open_osfhandle((intptr_t)file, _O_APPEND | _O_WRONLY);
+    if (descriptor == -1) {
+        CloseHandle(file);
+        return;
     }
-    logFile = _wfopen(path, mode);
+    logFile = _fdopen(descriptor, "a");
+    if (!logFile) _close(descriptor);
 }
 
 static void logMessage(const char *format, ...) {
@@ -774,6 +890,10 @@ static BOOL writeBytes(HANDLE file, const void *bytes, DWORD count) {
  * errors as text: given a command on its command line instead, it reports them as XML when its output isn't a console. The
  * script makes PowerShell's output UTF-8, hides progress, and exits with the status of the last program the command ran,
  * or 1 if the command failed. PowerShell 5 only reads scripts as UTF-8 when they start with a byte order mark.
+ *
+ * The script is in the agent's temporary folder, which is the system's, where standard users can make files. So it has a random
+ * name, and it's always a new file that only the system and administrators can read or change, which can't be replaced before
+ * PowerShell runs it.
  */
 static BOOL writeScript(const char *command, uint32_t length, uint32_t channel, wchar_t *path) {
     static const uint8_t byteOrderMark[] = { 0xEF, 0xBB, 0xBF };
@@ -788,10 +908,29 @@ static BOOL writeScript(const char *command, uint32_t length, uint32_t channel, 
     DWORD directoryLength = GetTempPathW(MAX_PATH, directory);
     if (directoryLength == 0 || directoryLength > MAX_PATH - 64) return FALSE;
 
-    swprintf(path, MAX_PATH, L"%lsHypervisaur-%u-%llu.ps1", directory, channel, (unsigned long long)GetTickCount64());
+    SECURITY_ATTRIBUTES attributes;
+    if (!makeSecurityAttributes(PRIVATE_FILE_SDDL, &attributes)) return FALSE;
 
-    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
-    if (file == INVALID_HANDLE_VALUE) return FALSE;
+    HANDLE file = INVALID_HANDLE_VALUE;
+    for (int attempt = 0; attempt < 10 && file == INVALID_HANDLE_VALUE; attempt++) {
+        uint64_t random[2];
+        if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, (PUCHAR)random, sizeof(random), BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+            SetLastError(ERROR_GEN_FAILURE);
+            break;
+        }
+
+        swprintf(path, MAX_PATH, L"%lsHypervisaur-%u-%016llx%016llx.ps1", directory, channel, (unsigned long long)random[0], (unsigned long long)random[1]);
+        file = CreateFileW(path, GENERIC_WRITE, 0, &attributes, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, NULL);
+        if (file == INVALID_HANDLE_VALUE && GetLastError() != ERROR_FILE_EXISTS) break;
+    }
+
+    DWORD error = GetLastError();
+    LocalFree(attributes.lpSecurityDescriptor);
+    if (file == INVALID_HANDLE_VALUE) {
+        path[0] = 0;
+        SetLastError(error);
+        return FALSE;
+    }
 
     BOOL written = writeBytes(file, byteOrderMark, sizeof(byteOrderMark))
         && writeBytes(file, prefix, (DWORD)strlen(prefix))
@@ -1148,14 +1287,33 @@ static BOOL openConsoleUser(HANDLE *token, char **error) {
     return FALSE;
 }
 
-/* Finds the desktop of the user signed in at the display, which may have been moved, such as to OneDrive, in the \\?\ form. */
-static wchar_t *consoleDesktop(char **error) {
-    HANDLE token;
-    if (!openConsoleUser(&token, error)) return NULL;
+/*
+ * Transfers act as the user signed in at the display while they use files, with the token from openConsoleUser, so that they
+ * can only read and write what that user can. The files are in places that the user controls, such as their desktop, which they
+ * can point anywhere or replace with a link, or are ones that were dragged in their session. Acting as the system there would
+ * let the user have the agent read or write files that they can't themselves. With a NULL token, in the `console` mode, the agent
+ * acts as its own user.
+ */
+static BOOL actAsUser(HANDLE token) {
+    return !token || ImpersonateLoggedOnUser(token);
+}
 
+static void stopActingAsUser(HANDLE token) {
+    if (!token || RevertToSelf()) return;
+
+    /* The thread would go on acting as the user, so the agent stops, and the service manager starts it again. */
+    logMessage("Couldn't stop acting as the user signed in to Windows (error %lu)", GetLastError());
+    ExitProcess(1);
+}
+
+static char *actingFailure(DWORD error) {
+    return formatText("Couldn't act as the user signed in to Windows (error %lu).", error);
+}
+
+/* Finds the desktop of the user with the token, which may have been moved, such as to OneDrive, in the \\?\ form. */
+static wchar_t *userDesktop(HANDLE token, char **error) {
     wchar_t *folder = NULL;
     HRESULT result = SHGetKnownFolderPath(&desktopFolder, 0, token, &folder);
-    if (token) CloseHandle(token);
 
     wchar_t *desktop = SUCCEEDED(result) ? extendedPath(folder) : NULL;
     CoTaskMemFree(folder);
@@ -1170,8 +1328,8 @@ static wchar_t *consoleDesktop(char **error) {
 /* MARK: - Putting files in the guest */
 
 /*
- * Items are written into a hidden folder in the destination, so that they get its permissions: the service runs as SYSTEM, so
- * items written anywhere else would keep permissions that the user can't use. Folders are kept by their paths in the transfer,
+ * The agent acts as the user whose desktop it is while it uses files there. Items are written into a hidden folder in the
+ * destination, so that they're only seen when they're complete, and so that they get its permissions. Folders are kept by their paths in the transfer,
  * so that the items in them can be found quickly however many there are, and their dates are set after everything in them
  * is written, since writing items in a folder changes its date. When all the items are received, the top-level ones are moved
  * into the destination.
@@ -1193,6 +1351,8 @@ typedef struct {
 
 typedef struct Upload {
     uint32_t channel;
+    /* The token of the user whose desktop the files are put on, or NULL in the `console` mode. */
+    HANDLE user;
     wchar_t *destination;
     wchar_t *staging;
 
@@ -1316,7 +1476,12 @@ static void discardUpload(Upload *upload) {
     }
 
     if (upload->file != INVALID_HANDLE_VALUE) CloseHandle(upload->file);
-    if (!removeItem(upload->staging)) logMessage("Channel %u: couldn't remove the folder the files were received in (error %lu)", upload->channel, GetLastError());
+
+    BOOL isRemoved = actAsUser(upload->user) && removeItem(upload->staging);
+    DWORD error = GetLastError();
+    stopActingAsUser(upload->user);
+    if (!isRemoved) logMessage("Channel %u: couldn't remove the folder the files were received in (error %lu)", upload->channel, error);
+    if (upload->user) CloseHandle(upload->user);
 
     for (size_t index = 0; index < upload->folderBuckets; index++) {
         ReceivedFolder *folder = upload->folders[index];
@@ -1430,31 +1595,41 @@ static void startUpload(uint32_t channel, const uint8_t *payload, uint32_t lengt
     }
 
     char *error = NULL;
-    wchar_t *destination = consoleDesktop(&error);
-    if (!destination) {
+    HANDLE user;
+    if (!openConsoleUser(&user, &error)) {
         sendFailure(channel, error);
         return;
     }
 
-    removeStagingFolders(destination);
-
-    wchar_t *staging = createStagingFolder(destination, channel);
-    if (!staging) {
-        sendFailure(channel, formatText("Couldn't prepare the desktop for the files (error %lu).", GetLastError()));
+    wchar_t *destination = userDesktop(user, &error);
+    Upload *upload = destination ? calloc(1, sizeof(Upload)) : NULL;
+    if (!upload) {
+        if (user) CloseHandle(user);
         free(destination);
+        sendFailure(channel, error);
         return;
     }
 
-    Upload *upload = calloc(1, sizeof(Upload));
-    if (!upload) {
-        RemoveDirectoryW(staging);
-        free(staging);
+    wchar_t *staging = NULL;
+    BOOL isActing = actAsUser(user);
+    DWORD status = GetLastError();
+    if (isActing) {
+        removeStagingFolders(destination);
+        staging = createStagingFolder(destination, channel);
+        status = GetLastError();
+    }
+    stopActingAsUser(user);
+
+    if (!staging) {
+        sendFailure(channel, isActing ? formatText("Couldn't prepare the desktop for the files (error %lu).", status) : actingFailure(status));
+        if (user) CloseHandle(user);
         free(destination);
-        sendFailure(channel, NULL);
+        free(upload);
         return;
     }
 
     upload->channel = channel;
+    upload->user = user;
     upload->destination = destination;
     upload->staging = staging;
     upload->file = INVALID_HANDLE_VALUE;
@@ -1485,7 +1660,8 @@ static void receiveTransferSize(Upload *upload, const uint8_t *payload, uint32_t
     uint64_t size = getUInt64(payload);
     wchar_t *folder = joinPath(upload->staging, L"");
     ULARGE_INTEGER available;
-    BOOL hasSpace = !folder || !GetDiskFreeSpaceExW(folder, &available, NULL, NULL) || available.QuadPart >= size;
+    BOOL hasSpace = !folder || !actAsUser(upload->user) || !GetDiskFreeSpaceExW(folder, &available, NULL, NULL) || available.QuadPart >= size;
+    stopActingAsUser(upload->user);
     free(folder);
     if (!hasSpace) {
         logMessage("Channel %u: the files need %llu bytes, and %llu are available", upload->channel, (unsigned long long)size, (unsigned long long)available.QuadPart);
@@ -1581,13 +1757,15 @@ static void receiveHeader(Upload *upload, const uint8_t *payload, uint32_t lengt
     }
 
     HANDLE file = INVALID_HANDLE_VALUE;
-    wchar_t *placed = placeItem(parent, name, isFolder, NULL, &file);
+    BOOL isActing = actAsUser(upload->user);
+    wchar_t *placed = isActing ? placeItem(parent, name, isFolder, NULL, &file) : NULL;
     DWORD error = GetLastError();
+    stopActingAsUser(upload->user);
     free(name);
 
     if (!placed) {
         char *shown = formatText("%.*s", shownLength, path);
-        failUpload(upload, shown ? writeFailure(shown, error) : NULL);
+        failUpload(upload, !isActing ? actingFailure(error) : shown ? writeFailure(shown, error) : NULL);
         free(shown);
         return;
     }
@@ -1670,26 +1848,41 @@ static void finishUpload(Upload *upload) {
     }
 
     acknowledgeUpload(upload);
-    setFolderDates(upload);
 
     wchar_t **placed = calloc(upload->itemCount ? upload->itemCount : 1, sizeof(wchar_t *));
     if (!placed) {
         failUpload(upload, NULL);
         return;
     }
+    if (!actAsUser(upload->user)) {
+        DWORD error = GetLastError();
+        stopActingAsUser(upload->user);
+        free(placed);
+        failUpload(upload, actingFailure(error));
+        return;
+    }
 
-    for (size_t index = 0; index < upload->itemCount; index++) {
+    setFolderDates(upload);
+
+    char *message = NULL;
+    BOOL isMoved = TRUE;
+    for (size_t index = 0; index < upload->itemCount && isMoved; index++) {
         const TopItem *item = &upload->items[index];
         const wchar_t *name = wcsrchr(item->path, L'\\') + 1;
         placed[index] = placeItem(upload->destination, name, item->isFolder, item->path, NULL);
         if (placed[index]) continue;
 
         /* The items that were moved already are removed too, since the transfer failed. */
-        char *message = pathFailure("Couldn't move %s to the desktop (error %lu).", item->path, GetLastError());
+        isMoved = FALSE;
+        message = pathFailure("Couldn't move %s to the desktop (error %lu).", item->path, GetLastError());
         for (size_t moved = 0; moved < index; moved++) {
             if (!removeItem(placed[moved])) logMessage("Channel %u: couldn't remove an item after the transfer failed (error %lu)", upload->channel, GetLastError());
             free(placed[moved]);
         }
+    }
+    stopActingAsUser(upload->user);
+
+    if (!isMoved) {
         free(placed);
         failUpload(upload, message);
         return;
@@ -2257,6 +2450,9 @@ static BOOL sendItem(Transfer *transfer, const Item *item, void *context, char *
 /*
  * Sends the files that were asked for: first the size of the transfer, which needs a pass to count them, then each item. If
  * a path can't be read, the agent replies `failed`, before anything else when it's found while they're counted.
+ *
+ * The paths are ones that were dragged in the session of the user signed in at the display, which programs that user runs
+ * choose, so the files are read as that user.
  */
 static DWORD WINAPI sendFiles(void *context) {
     Transfer *transfer = context;
@@ -2267,7 +2463,15 @@ static DWORD WINAPI sendFiles(void *context) {
     Sender sender = {0};
     char *error = NULL;
 
-    BOOL succeeded = parseSources(transfer, &sources, &sourceCount, &error);
+    HANDLE user = NULL;
+    BOOL succeeded = openConsoleUser(&user, &error);
+    BOOL isActing = succeeded && actAsUser(user);
+    if (succeeded && !isActing) {
+        error = actingFailure(GetLastError());
+        succeeded = FALSE;
+    }
+
+    if (succeeded) succeeded = parseSources(transfer, &sources, &sourceCount, &error);
     for (size_t index = 0; succeeded && index < sourceCount; index++) {
         succeeded = walkSource(transfer, &sources[index], countItem, &totals, &error);
     }
@@ -2287,6 +2491,9 @@ static DWORD WINAPI sendFiles(void *context) {
         succeeded = walkSource(transfer, &sources[index], sendItem, &sender, &error);
     }
     if (succeeded) succeeded = sendOnTransfer(transfer, FRAME_FILES_END, NULL, 0);
+
+    if (isActing) stopActingAsUser(user);
+    if (user) CloseHandle(user);
 
     if (succeeded) {
         logMessage("Channel %u: sent %llu items (%llu bytes)", channel, (unsigned long long)totals.count, (unsigned long long)sender.sent);
@@ -3024,6 +3231,42 @@ static int runShareMapper(void) {
     return (int)result;
 }
 
+/* MARK: - Drivers disk */
+
+/*
+ * When Windows starts, the status script runs the setup script on Hypervisaur's drivers disk as the system if it's a newer
+ * version, so it has to be the disk that Hypervisaur attached. Users signed in to Windows can write to other volumes, and can
+ * make any of them look like it. So the disk is the removable volume named DRIVERS that can't be written to, which Hypervisaur
+ * attaches read-only: users can't make a removable volume read-only, and the disc images that they can mount are CD drives.
+ */
+
+#define DRIVERS_VOLUME_NAME L"DRIVERS"
+#define DRIVERS_SETUP_VERSION L"VirtIODrivers\\Setup.version"
+
+/* Prints the drive of the drivers disk, such as `E:`, and returns 0, or returns 1 if Windows doesn't have it. */
+static int printDriversDrive(void) {
+    DWORD drives = GetLogicalDrives();
+    for (wchar_t letter = L'D'; letter <= L'Z'; letter++) {
+        if (!(drives & (1u << (letter - L'A')))) continue;
+
+        wchar_t root[] = { letter, L':', L'\\', 0 };
+        if (GetDriveTypeW(root) != DRIVE_REMOVABLE) continue;
+
+        wchar_t name[MAX_PATH + 1];
+        DWORD flags = 0;
+        if (!GetVolumeInformationW(root, name, sizeof(name) / sizeof(name[0]), NULL, NULL, &flags, NULL, 0)) continue;
+        if (!(flags & FILE_READ_ONLY_VOLUME) || CompareStringOrdinal(name, -1, DRIVERS_VOLUME_NAME, -1, TRUE) != CSTR_EQUAL) continue;
+
+        wchar_t version[MAX_PATH];
+        swprintf(version, MAX_PATH, L"%ls%ls", root, DRIVERS_SETUP_VERSION);
+        if (GetFileAttributesW(version) == INVALID_FILE_ATTRIBUTES) continue;
+
+        printf("%c:\n", (char)letter);
+        return 0;
+    }
+    return 1;
+}
+
 /* MARK: - Protocol */
 
 static void sendHello(void) {
@@ -3281,6 +3524,11 @@ int wmain(int argumentCount, wchar_t **arguments) {
     /* `HypervisaurAgent.exe mapshares` connects its user to the shared folders, which the agent starts in each signed-in user's session. */
     if (argumentCount > 1 && wcscmp(arguments[1], L"mapshares") == 0) {
         return runShareMapper();
+    }
+
+    /* `HypervisaurAgent.exe drivers` prints the drive of the drivers disk for the status script. */
+    if (argumentCount > 1 && wcscmp(arguments[1], L"drivers") == 0) {
+        return printDriversDrive();
     }
 
     InitializeCriticalSection(&logLock);

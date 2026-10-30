@@ -184,22 +184,39 @@ struct WindowsInstallDiskTests {
         #expect(script.contains("copy /y \"%~dp0SPICEAgent\\*.*\" \"%AgentFolder%\""))
         #expect(script.contains("\"%AgentFolder%\\vdservice.exe\" install"))
         #expect(script.contains("net start vdservice"))
-        #expect(script.contains("copy /y \"%~dp0Setup.version\" \"%ProgramData%\\Hypervisaur\\Setup.version\""))
     }
 
     @Test func statusScriptRunsNewerSetupWhenWindowsStarts() {
         let script = WindowsDriversDisk.statusScript
-        #expect(script.contains("fc /b \"%%d:\\VirtIODrivers\\Setup.version\" \"%ProgramData%\\Hypervisaur\\Setup.version\" >nul 2>&1 || call \"%%d:\\VirtIODrivers\\Setup.cmd\""))
+        #expect(script.contains("fc /b \"%%d\\VirtIODrivers\\Setup.version\" \"%~dp0Setup.version\" >nul 2>&1 || call \"%%d\\VirtIODrivers\\Setup.cmd\""))
         /// The drivers disk is a USB drive, which may not be mounted yet when Windows starts.
         #expect(script.contains("for /l %%i in (1,1,15) do if not defined DriversChecked ("))
         #expect(script.contains("if not defined DriversChecked ping -n 3 127.0.0.1 >nul"))
     }
 
+    /// The setup script runs as the system, and users can put a folder with a setup script on other drives.
+    @Test func statusScriptOnlyRunsSetupFromTheDriveTheAgentFinds() {
+        let script = WindowsDriversDisk.statusScript
+        #expect(script.contains("for /f \"delims=\" %%d in ('\"\"%~dp0Agent\\HypervisaurAgent.exe\" drivers\"') do if not defined DriversChecked ("))
+        #expect(!script.contains("for %%d in (D E F"))
+        #expect(!script.contains("if exist \"%%d"))
+    }
+
+    /// Users can make folders in ProgramData, and could replace what SYSTEM runs from one that they made.
+    @Test func setupScriptKeepsWhatTheSystemRunsInProgramFiles() {
+        let script = WindowsDriversDisk.setupScript
+        #expect(script.contains("set \"StatusFolder=%ProgramFiles%\\Hypervisaur\""))
+        #expect(script.contains("copy /y \"%~dp0Status.cmd\" \"%StatusScript%\""))
+        #expect(script.contains("copy /y \"%~dp0Setup.version\" \"%StatusFolder%\\Setup.version\""))
+        #expect(!script.contains("ProgramData"))
+        #expect(!WindowsDriversDisk.statusScript.contains("ProgramData"))
+    }
+
     @Test func setupScriptInstallsDriversAndSignInTask() {
         let script = WindowsDriversDisk.setupScript
         #expect(script.contains("pnputil /add-driver \"%~dp0*.inf\" /subdirs /install"))
-        #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Started\" /sc onstart /ru SYSTEM /tr \"%StatusScript% startup\""))
-        #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Signed In\" /sc onlogon /ru SYSTEM /tr \"%StatusScript%\""))
+        #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Started\" /sc onstart /ru SYSTEM /tr \"\\\"%StatusScript%\\\" startup\""))
+        #expect(script.contains("schtasks /create /f /tn \"Hypervisaur\\Signed In\" /sc onlogon /ru SYSTEM /tr \"\\\"%StatusScript%\\\"\""))
         #expect(!script.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
     }
 
