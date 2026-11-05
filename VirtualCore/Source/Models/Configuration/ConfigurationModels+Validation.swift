@@ -220,8 +220,6 @@ public extension VBGuestType {
     /// Whether the clipboard is shared through a SPICE agent in the guest. macOS guests share it through the guest app instead.
     var supportsClipboardSharing: Bool { self == .linux || self == .windows }
 
-    var supportsBridgedNetworking: Bool { self != .windows }
-
     var supportsDisplayConfiguration: Bool { true }
 
     var supportsSoundInput: Bool { self != .windows }

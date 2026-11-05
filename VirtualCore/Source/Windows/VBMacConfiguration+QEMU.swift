@@ -19,10 +19,6 @@ public extension VBMacConfiguration {
             }
         }
 
-        if hardware.networkDevices.contains(where: { $0.kind != .NAT }) {
-            errors.append("Windows virtual machines only support NAT networking.")
-        }
-
         if hardware.memorySize < VBMacDevice.minimumWindowsMemorySize {
             warnings.append("Windows 11 requires at least 4 GB of memory.")
         }
@@ -31,7 +27,7 @@ public extension VBMacConfiguration {
             warnings.append("Audio input isn’t available for Windows virtual machines.")
         }
 
-        if hasSharedFolders, !hardware.networkDevices.contains(where: { $0.kind == .NAT }) {
+        if hasSharedFolders, !hasWindowsFolderSharingNetwork {
             warnings.append(Self.windowsSharedFoldersNeedNetworkNotice)
         }
 
@@ -43,4 +39,10 @@ public extension VBMacConfiguration {
     }
 
     static let windowsSharedFoldersNeedNetworkNotice = "Windows reaches shared folders over the network, so they need a network device."
+
+    /// Whether Windows can reach the shared folders: through the first NAT device's network, or through the folder sharing
+    /// network that a virtual machine whose devices are all bridged has. See ``QEMULaunchConfiguration/hasFolderSharingNetwork(_:)``.
+    var hasWindowsFolderSharingNetwork: Bool {
+        hardware.networkDevices.contains { $0.kind == .NAT } || QEMULaunchConfiguration.hasFolderSharingNetwork(hardware)
+    }
 }

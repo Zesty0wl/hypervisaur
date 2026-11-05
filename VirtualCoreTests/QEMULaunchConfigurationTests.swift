@@ -109,13 +109,82 @@ struct QEMULaunchConfigurationTests {
         #expect(throws: (any Error).self) { try makeConfiguration(for: vm).arguments() }
     }
 
-    @Test func bridgedNetworkingIsRejected() throws {
+    @Test func bridgedNetworkDeviceConnectsToHypervisaursNetwork() throws {
+        var vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        vm.configuration.hardware.networkDevices = [VBNetworkDevice(id: "en0", name: "en0", kind: .bridge, macAddress: "AA:BB:CC:DD:EE:01")]
+
+        let configuration = makeConfiguration(for: vm)
+        let arguments = try configuration.arguments()
+
+        #expect(vm.configuration.qemuSupportState.errors.isEmpty)
+        #expect(arguments.contains("stream,id=net0,server=off,addr.type=unix,addr.path=\(configuration.runtimePaths.networkSocket(forDeviceAt: 0).path)"))
+        #expect(arguments.contains("virtio-net-pci,netdev=net0,mac=aa:bb:cc:dd:ee:01"))
+    }
+
+    @Test func bridgedNetworkingIsRejectedWithQEMUsNetwork() throws {
         var vm = try makeWindowsMachine()
         try createBootDisk(for: vm)
         vm.configuration.hardware.networkDevices = [VBNetworkDevice(id: "en0", name: "en0", kind: .bridge)]
 
-        #expect(!vm.configuration.qemuSupportState.errors.isEmpty)
-        #expect(throws: (any Error).self) { try makeConfiguration(for: vm).arguments() }
+        var configuration = makeConfiguration(for: vm)
+        configuration.network = .qemu
+
+        #expect(throws: (any Error).self) { try configuration.arguments() }
+    }
+
+    @Test func folderSharingNetworkDoesNotDependOnTheSharedFolders() throws {
+        var vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        vm.configuration.hardware.networkDevices = [VBNetworkDevice(id: "en0", name: "en0", kind: .bridge)]
+        let argumentsWithoutFolders = try makeConfiguration(for: vm).comparableArguments()
+
+        vm.configuration.sharedFolders = [VBSharedFolder(url: FileManager.default.temporaryDirectory)]
+
+        #expect(try makeConfiguration(for: vm).comparableArguments() == argumentsWithoutFolders)
+        #expect(argumentsWithoutFolders.contains { $0.hasPrefix("virtio-net-pci,netdev=vbsharing") })
+    }
+
+    @Test func bridgedOnlyMachinesHaveAHostOnlyFolderSharingNetwork() throws {
+        var vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        vm.configuration.hardware.networkDevices = [VBNetworkDevice(id: "en0", name: "en0", kind: .bridge)]
+
+        let configuration = makeConfiguration(for: vm)
+        let arguments = try configuration.arguments()
+        let macAddress = QEMULaunchConfiguration.folderSharingNetworkMACAddress(for: vm)
+
+        #expect(arguments.contains("stream,id=vbsharing,server=off,addr.type=unix,addr.path=\(configuration.runtimePaths.folderSharingNetworkSocket.path)"))
+        #expect(arguments.contains("virtio-net-pci,netdev=vbsharing,mac=\(macAddress)"))
+        #expect(macAddress == QEMULaunchConfiguration.folderSharingNetworkMACAddress(for: vm))
+
+        let firstOctet = try #require(UInt8(macAddress.prefix(2), radix: 16))
+        #expect(firstOctet & 0x02 == 0x02, "The address is locally administered")
+        #expect(firstOctet & 0x01 == 0, "The address is unicast")
+    }
+
+    @Test func machinesWithANATDeviceShareFoldersThroughIt() throws {
+        var vm = try makeWindowsMachine()
+        try createBootDisk(for: vm)
+        vm.configuration.hardware.networkDevices = [
+            VBNetworkDevice(id: "en0", name: "en0", kind: .bridge),
+            VBNetworkDevice(),
+        ]
+
+        let arguments = try makeConfiguration(for: vm).arguments()
+
+        #expect(!arguments.contains { $0.contains("vbsharing") })
+    }
+
+    @Test func sharedFoldersNeedANetworkDevice() throws {
+        var vm = try makeWindowsMachine()
+        vm.configuration.sharedFolders = [VBSharedFolder(url: FileManager.default.temporaryDirectory)]
+
+        vm.configuration.hardware.networkDevices = [VBNetworkDevice(id: "en0", name: "en0", kind: .bridge)]
+        #expect(!vm.configuration.qemuSupportState.warnings.contains(VBMacConfiguration.windowsSharedFoldersNeedNetworkNotice))
+
+        vm.configuration.hardware.networkDevices = []
+        #expect(vm.configuration.qemuSupportState.warnings.contains(VBMacConfiguration.windowsSharedFoldersNeedNetworkNotice))
     }
 
     @Test func networkDeviceUsesConfiguredMACAddress() throws {

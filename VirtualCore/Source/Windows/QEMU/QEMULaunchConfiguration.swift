@@ -23,6 +23,11 @@ struct QEMULaunchConfiguration {
         func networkSocket(forDeviceAt index: Int) -> URL {
             networkSocketsDirectory.appending(path: "net\(index).sock")
         }
+
+        /// Where the network that only serves the shared folders listens. See ``QEMULaunchConfiguration/hasFolderSharingNetwork(_:)``.
+        var folderSharingNetworkSocket: URL {
+            networkSocketsDirectory.appending(path: "sharing.sock")
+        }
     }
 
     /// What runs the network that each network device is connected to.
@@ -30,7 +35,8 @@ struct QEMULaunchConfiguration {
         /// QEMU's own user networking, which gives the guest the Mac's loopback interface at the host's address.
         /// Only sessions that were saved with it are restored with it, since the network is part of their state.
         case qemu
-        /// ``QEMUNetwork``, which runs the same user networking without the Mac's loopback interface.
+        /// ``QEMUNetwork``, which runs the same user networking without the Mac's loopback interface for NAT devices,
+        /// and bridges the others to the Mac's network interfaces.
         case hypervisaur
     }
 
@@ -56,11 +62,37 @@ struct QEMULaunchConfiguration {
     /// saved. QEMU adds a USB hub when a device takes the last free port, so the devices only end up on the same ports as
     /// when the state was saved if the sound device is plugged in at first, and unplugged before the state is loaded.
     var restoresSavedState = false
-    /// Serves the folders that are shared with Windows through the first network device. See ``WindowsFolderSharing``.
+    /// Serves the folders that are shared with Windows through the first NAT network device, or the folder sharing network
+    /// if there's none. See ``WindowsFolderSharing`` and ``hasFolderSharingNetwork(_:)``.
     ///
     /// It isn't part of the virtual machine's state, so it's left out of the arguments that a saved session is compared with,
     /// and it's set up from the folders that are shared when the virtual machine starts.
     var folderSharing: WindowsFolderSharing?
+
+    /// The identifier of the QEMU network backend that the network device at the index is connected to, which its link
+    /// state is changed with.
+    static func netdevID(forDeviceAt index: Int) -> String {
+        "net\(index)"
+    }
+
+    /// Windows reaches the shared folders through a NAT device's network. A virtual machine whose network devices are all
+    /// bridged has a network device of its own for them, which only reaches the shared folders, so that it can still use them.
+    /// It doesn't depend on which folders are shared, which can change between runs without changing the virtual machine's
+    /// devices, so that saved sessions can still be restored.
+    static func hasFolderSharingNetwork(_ hardware: VBMacDevice) -> Bool {
+        hardware.networkDevices.contains { $0.kind == .bridge } && !hardware.networkDevices.contains { $0.kind == .NAT }
+    }
+
+    static let folderSharingNetdevID = "vbsharing"
+
+    /// The MAC address of the folder sharing network's device, which comes from the virtual machine's identifier so that it's
+    /// the same each time, and Windows recognizes the device as the same one. It's locally administered, and only ever on
+    /// that network.
+    static func folderSharingNetworkMACAddress(for model: VBVirtualMachine) -> String {
+        let identifier = model.uuid.uuid
+        let bytes = [(identifier.0 & 0xFC) | 0x02, identifier.1, identifier.2, identifier.3, identifier.4, identifier.5]
+        return bytes.map { String(format: "%02x", $0) }.joined(separator: ":")
+    }
 
     /// QEMU's current version of the machine type.
     static let defaultMachineType = "virt"
@@ -265,14 +297,14 @@ struct QEMULaunchConfiguration {
         var arguments = [String]()
 
         for (index, device) in model.configuration.hardware.networkDevices.enumerated() {
-            guard device.kind == .NAT else {
-                throw Failure("Windows virtual machines only support NAT networking. Change the network device “\(device.name)” to NAT in the virtual machine’s settings.")
-            }
-
-            let netdevID = "net\(index)"
+            let netdevID = Self.netdevID(forDeviceAt: index)
             let netdev: String
             switch network {
             case .qemu:
+                /// Only sessions saved before bridged networking was available for Windows use QEMU's networking.
+                guard device.kind == .NAT else {
+                    throw Failure("This saved session can only use NAT networking. Change the network device “\(device.name)” to NAT, or discard the saved session.")
+                }
                 var options = "user,id=\(netdevID)"
                 /// QEMU runs Samba for each connection that Windows makes to the server's address, on the SMB port.
                 if index == 0, let folderSharing {
@@ -280,13 +312,22 @@ struct QEMULaunchConfiguration {
                 }
                 netdev = options
             case .hypervisaur:
-                /// The network runs Samba for the first device instead. See ``QEMUNetwork``.
+                /// NAT and bridged devices are connected the same way, so a device's kind isn't part of the arguments that a
+                /// saved session is compared with. The first NAT device's network runs Samba. See ``QEMUNetwork``.
                 netdev = "stream,id=\(netdevID),server=off,addr.type=unix,addr.path=\(runtimePaths.networkSocket(forDeviceAt: index).path.qemuOptionEscaped)"
             }
 
             arguments += [
                 "-netdev", netdev,
                 "-device", "virtio-net-pci,netdev=\(netdevID),mac=\(device.macAddress.lowercased())",
+            ]
+        }
+
+        /// Only sessions saved before bridged networking was available for Windows use QEMU's networking, and they don't have it.
+        if network == .hypervisaur, Self.hasFolderSharingNetwork(model.configuration.hardware) {
+            arguments += [
+                "-netdev", "stream,id=\(Self.folderSharingNetdevID),server=off,addr.type=unix,addr.path=\(runtimePaths.folderSharingNetworkSocket.path.qemuOptionEscaped)",
+                "-device", "virtio-net-pci,netdev=\(Self.folderSharingNetdevID),mac=\(Self.folderSharingNetworkMACAddress(for: model))",
             ]
         }
 

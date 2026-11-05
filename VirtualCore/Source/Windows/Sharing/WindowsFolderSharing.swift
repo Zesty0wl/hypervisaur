@@ -5,7 +5,8 @@ import VirtualWormhole
 /// Shares the Mac's folders with a Windows virtual machine over SMB, using Samba from Homebrew.
 ///
 /// QEMU on the Mac has no virtiofs device, but Windows connects to SMB shares by itself. For each connection that Windows makes
-/// to ``serverAddress``, the virtual machine's network starts Samba with the configuration that this writes to QEMU's runtime
+/// to ``serverAddress``, the network of the virtual machine's first NAT device, or its folder sharing network if all its devices
+/// are bridged, starts Samba with the configuration that this writes to QEMU's runtime
 /// directory. See ``QEMUNetwork``. The server is only reachable from the virtual machine, and only runs while Windows is connected to it.
 ///
 /// Each folder is a share of its own, named after the folder, which Windows shows as a network drive, and which can be
@@ -65,7 +66,7 @@ struct WindowsFolderSharing {
         }
 
         let shares = shares(for: model.configuration.sharedFolders.filter { $0.isEnabled && $0.isAvailable })
-        guard !shares.isEmpty, model.configuration.hardware.networkDevices.contains(where: { $0.kind == .NAT }) else { return nil }
+        guard !shares.isEmpty, model.configuration.hasWindowsFolderSharingNetwork else { return nil }
 
         guard let homebrew = Homebrew.current, FileManager.default.isExecutableFile(atPath: serverURL(in: homebrew).path) else { return nil }
 

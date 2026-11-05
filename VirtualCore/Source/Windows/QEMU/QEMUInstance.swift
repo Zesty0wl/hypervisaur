@@ -18,8 +18,13 @@ final class QEMUInstance: VMEngineInstance {
     @Published private var isGuestAppConnected = false
     var isGuestAppConnectedPublisher: Published<Bool>.Publisher { $isGuestAppConnected }
 
-    let activeBridgeInterfaceIdentifiers = Set<String>()
-    let hasBridgedNetworkAttachments = false
+    var activeBridgeInterfaceIdentifiers: Set<String> {
+        machine?.bridgeInterfaceIdentifiers ?? []
+    }
+
+    var hasBridgedNetworkAttachments: Bool {
+        !activeBridgeInterfaceIdentifiers.isEmpty
+    }
 
     private let library: VMLibraryController
     private let onVMStop: (Error?) -> Void
@@ -157,11 +162,11 @@ final class QEMUInstance: VMEngineInstance {
     }
 
     func reconnectNetwork() throws {
-        throw Failure("Reconnecting the network isn’t available for Windows virtual machines.")
+        try requireMachine().reconnectNetwork()
     }
 
     func changeBridgeInterface(to interfaceIdentifier: String) throws {
-        throw Failure("Bridged networking isn’t available for Windows virtual machines.")
+        try requireMachine().changeBridgeInterface(to: interfaceIdentifier)
     }
 
     func stopGuestCommunication() async { }

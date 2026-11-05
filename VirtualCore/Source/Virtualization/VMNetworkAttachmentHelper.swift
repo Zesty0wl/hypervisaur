@@ -1,22 +1,7 @@
 import Foundation
 import OSLog
-import SystemConfiguration
 import Virtualization
 import ManagedPreferencesKit
-
-private func vmNetworkAttachmentDynamicStoreCallback(
-    _ store: SCDynamicStore,
-    changedKeys: CFArray,
-    info: UnsafeMutableRawPointer?
-) {
-    guard let info else { return }
-
-    MainActor.assumeIsolated {
-        let helper = Unmanaged<VMNetworkAttachmentHelper>.fromOpaque(info).takeUnretainedValue()
-        let keys = (changedKeys as NSArray).compactMap { $0 as? String }
-        helper.dynamicStoreDidChange(keys)
-    }
-}
 
 @MainActor
 final class VMNetworkAttachmentHelper {
@@ -84,10 +69,8 @@ final class VMNetworkAttachmentHelper {
 
     private var recoveryTasks: [Int: RecoveryTask] = [:]
 
-    private var dynamicStore: SCDynamicStore?
+    private var linkMonitor: HostInterfaceLinkMonitor?
     private var policyObservation: ManagedPreferenceObservation?
-    private var interfaceIdentifierByLinkKey: [String: String] = [:]
-    private var interfaceLinkStates: [String: Bool] = [:]
 
     init(
         virtualMachine: VZVirtualMachine,
@@ -149,57 +132,14 @@ final class VMNetworkAttachmentHelper {
             enforcePolicy()
             return
         }
-        guard dynamicStore == nil else { return }
+        guard linkMonitor == nil else { return }
 
         let interfaceIdentifiers = Set(attachmentConfigurations.compactMap { $0?.bridgeInterfaceIdentifier })
         guard !interfaceIdentifiers.isEmpty else { return }
 
-        var context = SCDynamicStoreContext(
-            version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: nil,
-            release: nil,
-            copyDescription: nil
-        )
-
-        guard let store = SCDynamicStoreCreate(
-            nil,
-            "Hypervisaur.VMNetworkAttachmentHelper" as CFString,
-            vmNetworkAttachmentDynamicStoreCallback,
-            &context
-        ) else {
-            logger.error("Failed to create SystemConfiguration dynamic store for bridge monitoring: error=\(SCError())")
-            return
+        linkMonitor = HostInterfaceLinkMonitor(interfaceIdentifiers: interfaceIdentifiers, logger: logger) { [weak self] interfaceIdentifier in
+            self?.handleHostInterfaceBecameActive(interfaceIdentifier)
         }
-
-        let linkKeyPairs = interfaceIdentifiers.map { interfaceIdentifier in
-            let key = Self.linkStateKey(for: interfaceIdentifier)
-            return (key, interfaceIdentifier)
-        }
-        let identifierByKey = Dictionary(uniqueKeysWithValues: linkKeyPairs)
-        let notificationKeys = Array(identifierByKey.keys)
-
-        guard SCDynamicStoreSetNotificationKeys(store, notificationKeys as CFArray, nil) else {
-            logger.error("Failed to register bridge link-state notifications: error=\(SCError())")
-            return
-        }
-
-        let initialLinkStates = Dictionary(uniqueKeysWithValues: interfaceIdentifiers.map {
-            ($0, Self.isLinkActive(interfaceIdentifier: $0, store: store))
-        })
-
-        dynamicStore = store
-        interfaceIdentifierByLinkKey = identifierByKey
-        interfaceLinkStates = initialLinkStates
-
-        guard SCDynamicStoreSetDispatchQueue(store, .main) else {
-            logger.error("Failed to schedule bridge link-state notifications: error=\(SCError())")
-            stopMonitoringHostInterfaces()
-            return
-        }
-
-        let monitoredInterfaces = interfaceIdentifiers.sorted().joined(separator: ", ")
-        logger.info("Monitoring host link state for bridged interface(s): \(monitoredInterfaces, privacy: .public)")
     }
 
     func stop() {
@@ -324,24 +264,6 @@ final class VMNetworkAttachmentHelper {
         )
     }
 
-    fileprivate func dynamicStoreDidChange(_ changedKeys: [String]) {
-        guard let store = dynamicStore else { return }
-
-        for key in Set(changedKeys) {
-            guard let interfaceIdentifier = interfaceIdentifierByLinkKey[key] else { continue }
-
-            let wasActive = interfaceLinkStates[interfaceIdentifier]
-            let isActive = Self.isLinkActive(interfaceIdentifier: interfaceIdentifier, store: store)
-            interfaceLinkStates[interfaceIdentifier] = isActive
-
-            logger.debug("Host bridge interface \(interfaceIdentifier, privacy: .public) link state changed: active=\(isActive)")
-
-            guard wasActive == false, isActive else { continue }
-
-            handleHostInterfaceBecameActive(interfaceIdentifier)
-        }
-    }
-
     private func handleHostInterfaceBecameActive(_ interfaceIdentifier: String) {
         let deviceIndices = attachmentConfigurations.indices.filter {
             attachmentConfigurations[$0]?.bridgeInterfaceIdentifier == interfaceIdentifier
@@ -463,34 +385,7 @@ final class VMNetworkAttachmentHelper {
     }
 
     private func stopMonitoringHostInterfaces() {
-        if let dynamicStore {
-            SCDynamicStoreSetDispatchQueue(dynamicStore, nil)
-        }
-
-        dynamicStore = nil
-        interfaceIdentifierByLinkKey.removeAll()
-        interfaceLinkStates.removeAll()
-    }
-
-    private static func linkStateKey(for interfaceIdentifier: String) -> String {
-        SCDynamicStoreKeyCreateNetworkInterfaceEntity(
-            nil,
-            kSCDynamicStoreDomainState,
-            interfaceIdentifier as CFString,
-            kSCEntNetLink
-        ) as String
-    }
-
-    private static func isLinkActive(
-        interfaceIdentifier: String,
-        store: SCDynamicStore
-    ) -> Bool {
-        let key = linkStateKey(for: interfaceIdentifier)
-
-        guard let linkState = SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any] else {
-            return false
-        }
-
-        return linkState[kSCPropNetLinkActive as String] as? Bool == true
+        linkMonitor?.stop()
+        linkMonitor = nil
     }
 }

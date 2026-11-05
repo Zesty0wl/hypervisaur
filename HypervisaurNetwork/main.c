@@ -6,7 +6,11 @@
  * the Mac that only accept connections from the Mac itself. QEMU has no option to stop that, but libslirp does, so this runs
  * libslirp with it, and with the same addresses as QEMU's user networking, which Windows has already been set up with.
  *
- *     HypervisaurNetwork <libslirp> <socket> [<address> <port> <command>]
+ *     HypervisaurNetwork [--host-only] <libslirp> <socket> [<address> <port> <command>]
+ *
+ * With --host-only, the network only reaches what's forwarded to it, which is the shared folders if any are shared. It's for
+ * Windows virtual machines whose other network devices are bridged: its DHCP gives Windows an address without a gateway or name server, and it
+ * has no IPv6, so that Windows doesn't send anything else through it.
  *
  * libslirp is loaded from Homebrew, where QEMU's package installs it. The network listens on the socket for QEMU to connect,
  * and exits when QEMU disconnects. With an address, a port and a command, each connection that the guest makes to the
@@ -377,11 +381,12 @@ static int acceptQEMU(int listener, const char *path) {
 }
 
 /* The same network as QEMU's user networking, apart from the Mac's loopback interface. */
-static Slirp *makeSlirp(Network *network) {
+static Slirp *makeSlirp(Network *network, bool hostOnly) {
     SlirpConfig configuration = {
         .version = 6,
+        .restricted = hostOnly,
         .in_enabled = true,
-        .in6_enabled = true,
+        .in6_enabled = !hostOnly,
         .vprefix_len = 64,
         .disable_host_loopback = true,
     };
@@ -411,8 +416,14 @@ static void addForward(Network *network, const char *addressString, const char *
 }
 
 int main(int argc, const char *argv[]) {
+    bool hostOnly = argc > 1 && strcmp(argv[1], "--host-only") == 0;
+    if (hostOnly) {
+        argc--;
+        argv++;
+    }
+
     if (argc != 3 && argc != 6) {
-        fprintf(stderr, "Usage: HypervisaurNetwork <libslirp> <socket> [<address> <port> <command>]\n");
+        fprintf(stderr, "Usage: HypervisaurNetwork [--host-only] <libslirp> <socket> [<address> <port> <command>]\n");
         return EXIT_FAILURE;
     }
 
@@ -427,7 +438,7 @@ int main(int argc, const char *argv[]) {
     network.pollfds = malloc(network.pollfdCapacity * sizeof(struct pollfd));
     if (!network.input || !network.output || !network.pollfds) fail("Out of memory");
 
-    network.slirp = makeSlirp(&network);
+    network.slirp = makeSlirp(&network, hostOnly);
     if (argc == 6) addForward(&network, argv[3], argv[4], argv[5]);
 
     int listener = listenForQEMU(argv[2]);

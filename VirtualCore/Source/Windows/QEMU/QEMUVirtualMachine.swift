@@ -342,10 +342,37 @@ public final class QEMUVirtualMachine: ObservableObject {
                 try await unplugSoundDevice(monitor: monitor)
             }
             try await loadState(from: restoration.stateFileURL, monitor: monitor)
+            await networks?.attach(to: monitor)
         } else {
             isSoundDeviceUnplugged = false
+            await networks?.attach(to: monitor)
             try await monitor.execute("cont")
         }
+    }
+
+    // MARK: - Network
+
+    /// The Mac's network interfaces that the bridged network devices are bridged to. See ``QEMUNetwork``.
+    var bridgeInterfaceIdentifiers: Set<String> {
+        networks?.bridgeInterfaceIdentifiers ?? []
+    }
+
+    /// Bridges the bridged network devices to their interfaces again.
+    func reconnectNetwork() throws {
+        guard let networks else {
+            throw Failure("Only bridged network devices can be reconnected in Windows virtual machines.")
+        }
+
+        try networks.reconnect()
+    }
+
+    /// Bridges the bridged network devices to the Mac's network interface with the identifier.
+    func changeBridgeInterface(to interfaceIdentifier: String) throws {
+        guard let networks else {
+            throw Failure("This virtual machine has no bridged network devices.")
+        }
+
+        try networks.changeBridgeInterface(to: interfaceIdentifier)
     }
 
     // MARK: - Saved Sessions

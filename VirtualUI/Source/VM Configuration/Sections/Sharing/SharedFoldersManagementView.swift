@@ -373,7 +373,7 @@ private struct WindowsSharedFoldersNote: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !configuration.hardware.networkDevices.contains(where: { $0.kind == .NAT }) {
+            if !configuration.hasWindowsFolderSharingNetwork {
                 Label(VBMacConfiguration.windowsSharedFoldersNeedNetworkNotice, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.yellow)
             }
